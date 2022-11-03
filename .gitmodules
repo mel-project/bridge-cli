@@ -1,0 +1,3 @@
+[submodule "bridge-covenants"]
+	path = bridge-covenants
+	url = https://github.com/themeliolabs/bridge-covenants
