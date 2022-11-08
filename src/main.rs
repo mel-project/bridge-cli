@@ -1,23 +1,52 @@
-use std::path::Path;
+use std::{path::Path, str::FromStr};
 
 use anyhow::Result;
 use argh::FromArgs;
+use ethers::{
+    types::{
+        Address as EthersAddress,
+        // Bytes,
+        // H160,
+        // U256
+    },
+    prelude::k256::SecretKey,
+    signers::LocalWallet
+};
 use melorun::LoadFileError;
 use mil::compiler::{BinCode, Compile};
+use serde::{Deserialize, Serialize};
+use serde_big_array::big_array;
+use serde_yaml;
 use themelio_stf::melvm::Covenant;
-// use themelio_structs::{
-//     CoinID,
-//     CoinData,
-//     Denom,
-//     Header,
-//     Transaction,
-// };
+use themelio_structs::{
+    Address as ThemelioAddress,
+    // CoinID,
+    // CoinData,
+    // Denom,
+    // Header,
+    // Transaction,
+};
+use tmelcrypt::Ed25519SK;
+
+big_array! { BigArray; }
 
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(description = "top-level cli argument")]
-struct TopLevel {
+struct Args {
     #[argh(subcommand)]
     subcommand: Subcommand,
+
+    #[argh(switch, description = "indicates that transactions will be dry runs only")]
+    dry_run: bool,
+
+    #[argh(option, description = "url of Ethereum RPC provider")]
+    ethereum_rpc: String,
+
+    #[argh(option, description = "themelio secret key")]
+    themelio_secret: Ed25519SK,
+
+    #[argh(option, description = "ethereum secret key")]
+    ethereum_secret: String,
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -42,7 +71,7 @@ struct FreezeAndMintArgs {
 
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "burn_and_thaw", description = "arguments for token burning and coin thawing transactions (i.e. bridging back from Ethereum to Themelio)")]
-struct BurnAndThawArgs{
+struct BurnAndThawArgs {
     #[argh(option, short = 'v', description = "value of the transaction")]
     value: String,
 
@@ -53,9 +82,25 @@ struct BurnAndThawArgs{
     themelio_recipient: String,
 }
 
-const COV_PATH: &str = "bridge-covenants/bridge.melo";
+/// An ecdsa secret key that implements FromStr that converts from hexadecimal
+#[derive(Copy, Clone, Serialize, Deserialize)]
+struct EcdsaSK(#[serde(with = "BigArray")] pub [u8; 64]);
 
-fn compile() -> Result<Covenant> {
+impl FromStr for EcdsaSK {
+    type Err = hex::FromHexError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let vv = hex::decode(s)?;
+        Ok(EcdsaSK(
+            vv.try_into()
+                .map_err(|_| hex::FromHexError::InvalidStringLength)?,
+        ))
+    }
+}
+
+const COV_PATH: &str = "bridge-covenants/bridge.melo";
+const CONFIG_PATH: &str = "config.yaml";
+
+fn compile_cov() -> Result<Covenant> {
     let cov_path = Path::new(COV_PATH);
     let melo_str = std::fs::read_to_string(cov_path)
         .map_err(LoadFileError::IoError)?;
@@ -71,18 +116,42 @@ fn compile() -> Result<Covenant> {
     Ok(covenant)
 }
 
+fn freeze() -> Result<bool> {
+    Ok(true)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let top_level: TopLevel = argh::from_env();
+    let args: Args = argh::from_env();
+    let subcommand = args.subcommand;
+    let dry_run = args.dry_run;
 
-    match top_level.subcommand {
-        Subcommand::FreezeAndMint(args) => println!("{:?}", args),
-        Subcommand::BurnAndThaw(args) => println!("{:?}", args),
+    match subcommand {
+        Subcommand::FreezeAndMint(sub_args) => println!("{:?}", sub_args),
+        Subcommand::BurnAndThaw(sub_args) => println!("{:?}", sub_args),
     }
 
-    let cov = compile()?;
+    let cov = compile_cov()?;
 
     println!("{:?}", cov);
+
+    let config = Config::try_from(args)
+        .expect("Unable to create config from cmd args");
+    // let network = config.network;
+    // let addr = config.network_addr;
+    // let db_name = format!("{network:?}-wallets.db").to_ascii_lowercase();
+
+    // if output_config {
+    //     println!(
+    //         "{}",
+    //         serde_yaml::to_string(&config)
+    //             .expect("Critical Failure: Unable to serialize `Config`")
+    //     );
+    // }
+
+    if dry_run {
+        return Ok(());
+    }
 
     Ok(())
 }
