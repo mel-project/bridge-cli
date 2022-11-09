@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.66"
-argh = "0.1.9"
+clap = { version = "4.0.22", features = ["derive"] }
 ethers = "1.0.0"
 hex = "0.4.3"
 melodeon = "0.5.15"
