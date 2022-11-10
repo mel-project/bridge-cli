@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, path::PathBuf};
+use std::{convert::TryFrom, path::PathBuf, net::SocketAddr};
 
 use anyhow::Result;
 use clap::{ArgGroup, Args, Parser};
@@ -15,13 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_yaml;
 use themelio_structs::{
     Address as ThemelioAddress,
-    // CoinID,
-    // CoinData,
     CoinValue,
     Denom,
-    // Header,
-    NetID,
-    // Transaction,
 };
 
 #[derive(Clone, Deserialize, Debug, Parser)]
@@ -37,14 +32,8 @@ pub struct Cli {
     #[clap(long)]
     pub config_path: Option<PathBuf>,
 
-    #[clap(long, default_value = "mainnet")]
-    pub network: NetID,
-
-    #[clap(long)]
-    pub ethereum_rpc: Option<String>,
-
-    #[clap(long)]
-    pub ethereum_secret: Option<String>,
+    #[clap(flatten)]
+    pub config: Option<Config>,
 
     #[clap(long)]
     pub dry_run: bool,
@@ -70,23 +59,30 @@ pub struct BurnAndThawArgs {
     themelio_recipient: ThemelioAddress,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Args, Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
-    network: NetID,
+    pub testnet: bool,
     ethereum_rpc: String,
     ethereum_secret: String,
+    /// Wallet API endpoint. For example localhost:11773
+    pub daemon_addr: Option<SocketAddr>,
+    pub wallet_name: String,
 }
 
 impl Config {
     fn new(
-        network: NetID,
+        testnet: bool,
         ethereum_rpc: String,
         ethereum_secret: String,
+        daemon_addr: Option<SocketAddr>,
+        wallet_name: String,
     ) -> Config {
         Config {
-            network,
+            testnet,
             ethereum_rpc,
             ethereum_secret,
+            daemon_addr,
+            wallet_name,
         }
     }
 }
@@ -95,22 +91,23 @@ impl TryFrom<Cli> for Config {
     type Error = anyhow::Error;
 
     fn try_from(args: Cli) -> Result<Self, Self::Error> {
-        match args.config_path {
-            Some(config_path) => {
-                let config_str = std::fs::read_to_string(config_path)
-                    .map_err(LoadFileError::IoError)?;
-                let config: Config = serde_yaml::from_str(&config_str)?;
+        if let Some(config_path) = args.config_path {
+            let config_str = std::fs::read_to_string(config_path)
+                .map_err(LoadFileError::IoError)?;
+            let config: Config = serde_yaml::from_str(&config_str)?;
 
-                Ok(config)
-            }
+            Ok(config)
+        } else {
+            let config = args.config
+                .expect("Either config path or config args must be included as CLI args");
 
-            None => {
-                Ok(Config::new(
-                    args.network,
-                    args.ethereum_rpc.expect("ethereum_rpc required if no config path supplied"),
-                    args.ethereum_secret.expect("ethereum_secret required if no config path supplied"),
-                ))
-            }
+            Ok(Config::new(
+                config.testnet,
+                config.ethereum_rpc,
+                config.ethereum_secret,
+                config.daemon_addr,
+                config.wallet_name
+            ))
         }
     }
 }
