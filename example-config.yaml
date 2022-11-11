@@ -1,0 +1,4 @@
+ethereum_rpc: https://ethereum.org 
+ethereum_secret: 0000000000000000000000000000000000000000000000000000000000000001
+wallet_name: styx
+testnet: false

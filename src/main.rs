@@ -55,6 +55,7 @@ async fn freeze(config: &Config) -> Result<bool> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Cli::parse();
+
     let subcommand = &args.subcommand;
     let dry_run = &args.dry_run;
 
@@ -83,6 +84,7 @@ async fn main() -> Result<()> {
             //     send_tx(&mut twriter, wallet, tx.clone()).await?;
             //     (serde_json::to_string_pretty(&tx)?, wargs.common)
             // }
+            println!("{:?}", sub_args)
         }
         Subcommand::BurnAndThaw(sub_args) => println!("{:?}", sub_args),
     }
@@ -122,8 +124,11 @@ async fn main() -> Result<()> {
             .stdout(Stdio::null())
             .spawn()
             .unwrap();
+
         smol::Timer::after(Duration::from_secs(1)).await;
+
         _running_daemon = Some(daemon);
+
         format!("127.0.0.1:{}", port).parse().unwrap()
     };
 

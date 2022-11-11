@@ -20,11 +20,6 @@ use themelio_structs::{
 };
 
 #[derive(Clone, Deserialize, Debug, Parser)]
-#[clap(group(
-    ArgGroup::new("options")
-        .required(true)
-        .args(&["config-path", "config"])),
-)]
 pub struct Cli {
     #[command(subcommand)]
     pub subcommand: Subcommand,
@@ -47,25 +42,44 @@ pub enum Subcommand {
 
 #[derive(Args, Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct FreezeAndMintArgs {
+    #[clap(long)]
     value: CoinValue,
+
+    #[clap(long)]
     denom: Denom,
+
+    #[clap(long)]
     ethereum_recipient: EthersAddress,
 }
 
 #[derive(Args, Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct BurnAndThawArgs {
+    #[clap(long)]
     value: CoinValue,
+
+    #[clap(long)]
     denom: Denom,
+
+    #[clap(long)]
     themelio_recipient: ThemelioAddress,
 }
 
 #[derive(Args, Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
+    #[clap(long)]
     pub testnet: bool,
+
+    #[clap(long)]
     ethereum_rpc: String,
+
+    #[clap(long)]
     ethereum_secret: String,
+
     /// Wallet API endpoint. For example localhost:11773
+    #[clap(long)]
     pub daemon_addr: Option<SocketAddr>,
+
+    #[clap(long)]
     pub wallet_name: String,
 }
 
