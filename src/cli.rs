@@ -1,15 +1,8 @@
 use std::{convert::TryFrom, path::PathBuf, net::SocketAddr};
 
 use anyhow::Result;
-use clap::{ArgGroup, Args, Parser};
-use ethers::{
-    types::{
-        Address as EthersAddress,
-        // Bytes,
-        // H160,
-        // U256
-    },
-};
+use clap::{Args, Parser};
+use ethers::types::Address as EthersAddress;
 use melorun::LoadFileError;
 use serde::{Deserialize, Serialize};
 use serde_yaml;

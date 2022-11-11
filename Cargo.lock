@@ -656,6 +656,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 4.0.22",
+ "colored",
  "dirs",
  "env_logger",
  "ethers",
@@ -666,12 +667,16 @@ dependencies = [
  "melorun",
  "melwallet-client",
  "mil",
+ "once_cell",
  "prodash",
  "scopeguard",
  "serde",
  "serde-big-array",
+ "serde_json",
  "serde_yaml",
  "smol",
+ "stdcode",
+ "tabwriter",
  "tap",
  "themelio-stf 0.11.12",
  "themelio-structs",
@@ -3183,9 +3188,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e82dad04139b71a90c080c8463fe0dc7902db5192d939bd0950f074d014339e1"
+checksum = "86f0b0d4bf799edbc74508c1e8bf170ff5f41238e5f8225603ca7caaae2b7860"
 
 [[package]]
 name = "opaque-debug"
@@ -4562,9 +4567,9 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stdcode"
-version = "0.1.11"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edfdcab0d6366126df8567d2bf735dd9ea36b0acb36262163e580f9d2a06d6fe"
+checksum = "11c1d4e26481e72c69584ace33a2e9e070b1f58b12d1dd4c58c49ffde7d23c23"
 dependencies = [
  "bincode",
  "bytes",
