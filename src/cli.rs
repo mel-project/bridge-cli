@@ -1,7 +1,10 @@
-use std::{convert::TryFrom, path::PathBuf, net::SocketAddr};
+use std::{
+    path::PathBuf,
+    convert::TryFrom,
+};
 
 use anyhow::Result;
-use clap::{Args, Parser};
+use clap::{ArgGroup, Args, Parser};
 use ethers::types::Address as EthersAddress;
 use melorun::LoadFileError;
 use serde::{Deserialize, Serialize};
@@ -13,15 +16,22 @@ use themelio_structs::{
 };
 
 #[derive(Clone, Deserialize, Debug, Parser)]
+#[command(version, about, long_about)]
+#[clap(group(
+    ArgGroup::new("config_file")
+        .args(&["config_path"])
+        .args(&["testnet", "ethereum_rpc", "ethereum_secret", "wallet_name"])
+        .multiple(false)
+))]
 pub struct Cli {
-    #[command(subcommand)]
-    pub subcommand: Subcommand,
-
     #[clap(long)]
     pub config_path: Option<PathBuf>,
 
     #[clap(flatten)]
     pub config: Option<Config>,
+
+    #[command(subcommand)]
+    pub subcommand: Subcommand,
 
     #[clap(long)]
     pub dry_run: bool,
@@ -36,43 +46,39 @@ pub enum Subcommand {
 #[derive(Args, Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct FreezeAndMintArgs {
     #[clap(long)]
-    value: CoinValue,
+    pub value: CoinValue,
 
     #[clap(long)]
-    denom: Denom,
+    pub denom: Denom,
 
     #[clap(long)]
-    ethereum_recipient: EthersAddress,
+    pub ethereum_recipient: EthersAddress,
 }
 
 #[derive(Args, Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct BurnAndThawArgs {
     #[clap(long)]
-    value: CoinValue,
+    pub value: CoinValue,
 
     #[clap(long)]
-    denom: Denom,
+    pub denom: Denom,
 
     #[clap(long)]
-    themelio_recipient: ThemelioAddress,
+    pub themelio_recipient: ThemelioAddress,
 }
 
 #[derive(Args, Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
-    #[clap(long)]
+    #[clap(long, group = "config")]
     pub testnet: bool,
 
-    #[clap(long)]
+    #[clap(long, group = "config")]
     ethereum_rpc: String,
 
-    #[clap(long)]
+    #[clap(long, group = "config")]
     ethereum_secret: String,
 
-    /// Wallet API endpoint. For example localhost:11773
-    #[clap(long)]
-    pub daemon_addr: Option<SocketAddr>,
-
-    #[clap(long)]
+    #[clap(long, group = "config")]
     pub wallet_name: String,
 }
 
@@ -81,14 +87,12 @@ impl Config {
         testnet: bool,
         ethereum_rpc: String,
         ethereum_secret: String,
-        daemon_addr: Option<SocketAddr>,
         wallet_name: String,
     ) -> Config {
         Config {
             testnet,
             ethereum_rpc,
             ethereum_secret,
-            daemon_addr,
             wallet_name,
         }
     }
@@ -112,7 +116,6 @@ impl TryFrom<Cli> for Config {
                 config.testnet,
                 config.ethereum_rpc,
                 config.ethereum_secret,
-                config.daemon_addr,
                 config.wallet_name
             ))
         }

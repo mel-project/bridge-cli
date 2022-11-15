@@ -1,30 +1,24 @@
 mod cli;
 
 use std::io::{BufReader, Read, Stdin, Write};
-use std::process::Command;
-use std::time::Duration;
 use std::sync::Mutex;
 use std::path::Path;
-use std::process::Stdio;
 use std::convert::TryFrom;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use colored::Colorize;
 use melorun::LoadFileError;
-use melwallet_client::{DaemonClient, WalletClient};
 use mil::compiler::{BinCode, Compile};
 use once_cell::sync::Lazy;
-use prodash::Tree;
-use serde_big_array::big_array;
 use smol;
 use stdcode::StdcodeSerializeExt;
 use tabwriter::TabWriter;
-use tap::Tap;
 use themelio_stf::melvm::Covenant;
 use themelio_structs::{
     CoinData,
     CoinID,
+    CoinValue,
     NetID,
     Transaction,
     TxHash,
@@ -32,8 +26,7 @@ use themelio_structs::{
 };
 
 use cli::{*};
-
-big_array! { BigArray; }
+use tmelcrypt::HashVal;
 
 const COV_PATH: &str = "bridge-covenants/bridge.melo";
 static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
@@ -80,7 +73,7 @@ async fn proceed_prompt() -> anyhow::Result<()> {
     .await?;
 
     if letter[0].to_ascii_lowercase() != b'y' {
-        anyhow::bail!("canceled");
+        anyhow::bail!("Canceled");
     }
 
     Ok(())
@@ -102,7 +95,7 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
 
 async fn send_tx(
     mut twriter: impl Write,
-    wallet: WalletClient,
+    //wallet: WalletClient,
     tx: Transaction,
 ) -> Result<()> {
     writeln!(twriter, "{}", "TRANSACTION RECIPIENTS".bold())?;
@@ -125,122 +118,72 @@ async fn send_tx(
 
     proceed_prompt().await?;
 
-    let txhash = wallet.send_tx(tx).await?;
+    //let tx_hash = wallet.send_tx(tx).await?;
+    let tx_hash = TxHash(HashVal::random());
 
-    write_txhash(&mut twriter, wallet.name(), txhash)?;
+    //write_txhash(&mut twriter, wallet.name(), tx_hash)?;
+    write_txhash(&mut twriter, "todo", tx_hash)?;
 
     Ok(())
 }
 
-async fn freeze(wallet: &WalletClient, twriter: impl Write, args: &Cli, config: &Config) -> Result<bool> {
-    let force_spend: Vec<CoinID> = vec!();
-    let desired_outputs: Vec<CoinData> = vec!();
-    let covenants: Vec<Covenant> = vec!(compile_cov()?);
-    let fee_ballast: usize = 300;
+async fn freeze(
+    wallet: String,
+    mut twriter: impl Write,
+    freeze_args: &FreezeAndMintArgs,
+    dry_run: &bool,
+) -> Result<()> {
+    let inputs: Vec<CoinID> = vec!();
+    let cov = compile_cov()?;
+    let output = CoinData{
+        covhash: cov.hash(),
+        value: freeze_args.value,
+        denom: freeze_args.denom,
+        additional_data: freeze_args.ethereum_recipient.0.into(),
+    };
+    let fee = CoinValue(300); // later actually calculate fee
 
-    let tx = wallet
-        .prepare_transaction(
-            TxKind::Normal,
-            force_spend,
-            desired_outputs,
-            covenants,
-            vec![],
-            vec![],
-            fee_ballast,
-        )
-        .await?;
+    let tx = Transaction::new(TxKind::Normal)
+        .with_inputs(inputs)
+        .add_output(output)
+        .with_fee(fee);
 
-    if args.dry_run {
+    if *dry_run {
+        println!("Wallet: {}\nTransaction: {:#?}", wallet, tx);
         println!("{}", hex::encode(tx.stdcode()));
     } else {
-        send_tx(&mut twriter, *wallet, tx.clone()).await?;
+        send_tx(&mut twriter, tx.clone()).await?;
         println!("{}", serde_json::to_string_pretty(&tx)?);
     }
 
-    Ok(true)
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut twriter = TabWriter::new(std::io::stderr());
+    let twriter = TabWriter::new(std::io::stderr());
 
     let args = Cli::parse();
     let subcommand = &args.subcommand;
     let dry_run = &args.dry_run;
 
     let config = Config::try_from(args.clone())
-        .expect("Unable to create config from cmd args");
+        .expect("Unable to create config from CLI args");
 
-    let dash_root = Tree::new();
-    // let dash_options = Options::default();
-
-    env_logger::init();
-
-    // either use provided daemon or spawn a new one
-    let mut _running_daemon = None;
-    let daemon_addr = if let Some(addr) = config.daemon_addr {
-        addr
-    } else {
-        // spawn daemon
-        let port = fastrand::usize(5000..15000);
-        let daemon = Command::new("melwalletd")
-            .arg("--listen")
-            .arg(format!("127.0.0.1:{}", port))
-            .arg("--wallet-dir")
-            .arg(dirs::config_dir().unwrap().tap_mut(|p| p.push("bridge-cli")))
-            .stderr(Stdio::null())
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .spawn()
-            .unwrap();
-
-        smol::Timer::after(Duration::from_secs(1)).await;
-
-        _running_daemon = Some(daemon);
-
-        format!("127.0.0.1:{}", port).parse().unwrap()
-    };
-
-    scopeguard::defer!({
-        if let Some(mut d) = _running_daemon {
-            let _ = d.kill();
-        }
-    });
-
-    let daemon = DaemonClient::new(daemon_addr);
     let network_id = if config.testnet {
         NetID::Testnet
     } else {
         NetID::Mainnet
     };
 
-    let wallet_name = format!("{}{:?}", config.wallet_name, network_id);
-    let wallet = match daemon.get_wallet(&wallet_name).await? {
-        Some(wallet) => wallet,
-        None => {
-            let mut evt = dash_root.add_child(format!("creating new wallet {}", wallet_name));
-            evt.init(None, None);
-
-            log::info!("Creating new wallet");
-
-            daemon
-                .create_wallet(&wallet_name, config.testnet, None, None)
-                .await?;
-
-            daemon
-                .get_wallet(&wallet_name)
-                .await?
-                .context("Wallet creation failed")?
-        }
-    };
-
-    wallet.unlock(None).await?;
+    let wallet_id = format!("{}{:?}", config.wallet_name, network_id);
 
     match subcommand {
-        Subcommand::FreezeAndMint(sub_args) => {
-            println!("{:?}", sub_args);
+        Subcommand::FreezeAndMint(args) => {
+            println!("{:#?}", args);
+            println!("{:#?}", config);
 
-            freeze(&wallet, twriter, &args, &config);
+            freeze(wallet_id, twriter, args, dry_run).await?;
         }
 
         Subcommand::BurnAndThaw(sub_args) => println!("{:?}", sub_args),
