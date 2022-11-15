@@ -12,7 +12,6 @@ use melorun::LoadFileError;
 use mil::compiler::{BinCode, Compile};
 use once_cell::sync::Lazy;
 use smol;
-use stdcode::StdcodeSerializeExt;
 use tabwriter::TabWriter;
 use themelio_stf::melvm::Covenant;
 use themelio_structs::{
@@ -24,9 +23,9 @@ use themelio_structs::{
     TxHash,
     TxKind,
 };
+use tmelcrypt::HashVal;
 
 use cli::{*};
-use tmelcrypt::HashVal;
 
 const COV_PATH: &str = "bridge-covenants/bridge.melo";
 static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
@@ -73,7 +72,7 @@ async fn proceed_prompt() -> anyhow::Result<()> {
     .await?;
 
     if letter[0].to_ascii_lowercase() != b'y' {
-        anyhow::bail!("Canceled");
+        anyhow::bail!("Cancelled");
     }
 
     Ok(())
@@ -93,24 +92,24 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
     Ok(())
 }
 
-async fn send_tx(
+async fn freeze_tx(
     mut twriter: impl Write,
-    //wallet: WalletClient,
+    wallet_id: String,
     tx: Transaction,
 ) -> Result<()> {
-    writeln!(twriter, "{}", "TRANSACTION RECIPIENTS".bold())?;
-    writeln!(twriter, "{}", "Address\tAmount\tAdditional data".italic())?;
+    let output = &tx.outputs[0];
 
-    for output in tx.outputs.iter() {
-        writeln!(
-            twriter,
-            "{}\t{} {}\t{:?}",
-            output.covhash.to_string().bright_blue(),
-            output.value,
-            output.denom,
-            hex::encode(&output.additional_data)
-        )?;
-    }
+    writeln!(twriter, "{}", "FREEZING COIN".bold())?;
+    writeln!(twriter, "{}", "Bridge Address\tValue\tDenomination\tAdditional data".italic())?;
+
+    writeln!(
+        twriter,
+        "{}\t{}\t{}\t{:?}",
+        output.covhash.to_string().bright_blue(),
+        output.value,
+        output.denom,
+        hex::encode(&output.additional_data)
+    )?;
 
     writeln!(twriter, "{}\t{} MEL", " (network fees)".yellow(), tx.fee)?;
 
@@ -121,14 +120,13 @@ async fn send_tx(
     //let tx_hash = wallet.send_tx(tx).await?;
     let tx_hash = TxHash(HashVal::random());
 
-    //write_txhash(&mut twriter, wallet.name(), tx_hash)?;
-    write_txhash(&mut twriter, "todo", tx_hash)?;
+    write_txhash(&mut twriter, &wallet_id, tx_hash)?;
 
     Ok(())
 }
 
 async fn freeze(
-    wallet: String,
+    wallet_id: String,
     mut twriter: impl Write,
     freeze_args: &FreezeAndMintArgs,
     dry_run: &bool,
@@ -149,10 +147,9 @@ async fn freeze(
         .with_fee(fee);
 
     if *dry_run {
-        println!("Wallet: {}\nTransaction: {:#?}", wallet, tx);
-        println!("{}", hex::encode(tx.stdcode()));
+        println!("{}", serde_json::to_string_pretty(&tx)?);
     } else {
-        send_tx(&mut twriter, tx.clone()).await?;
+        freeze_tx(&mut twriter, wallet_id, tx.clone()).await?;
         println!("{}", serde_json::to_string_pretty(&tx)?);
     }
 
@@ -180,9 +177,6 @@ async fn main() -> Result<()> {
 
     match subcommand {
         Subcommand::FreezeAndMint(args) => {
-            println!("{:#?}", args);
-            println!("{:#?}", config);
-
             freeze(wallet_id, twriter, args, dry_run).await?;
         }
 
