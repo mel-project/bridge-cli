@@ -18,7 +18,6 @@ use melnet2::{Backhaul, wire::tcp::TcpBackhaul};
 use melorun::LoadFileError;
 use mil::compiler::{BinCode, Compile};
 use once_cell::sync::Lazy;
-use smol;
 use tabwriter::TabWriter;
 use themelio_nodeprot::{ValClient, NodeRpcClient};
 use themelio_stf::melvm::Covenant;
@@ -26,7 +25,7 @@ use themelio_structs::{
     CoinData,
     CoinID,
     CoinValue,
-    //Header,
+    Header,
     NetID,
     Transaction,
     TxHash,
@@ -43,25 +42,32 @@ static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
     Lazy::new(|| Mutex::new(BufReader::new(std::io::stdin())));
 
 pub static CLI_ARGS: Lazy<Cli> = Lazy::new(Cli::parse);
+// pub static CONFIG: Lazy<Config> = Lazy::new(Config::try_from(CLI_ARGS));
 
 /// The global ValClient for talking to the Themelio network
 pub static CLIENT: Lazy<ValClient> = Lazy::new(|| {
     smol::block_on(async move {
         let backhaul = TcpBackhaul::new();
-        let testnet = CLI_ARGS.config.as_ref().unwrap().testnet;
-        let network = if testnet {
-            NetID::Testnet
+        let config = Config::try_from(CLI_ARGS.to_owned()).unwrap();
+        let testnet = config.testnet;
+
+        let (network, mut themelio_rpc) = if testnet {
+            (NetID::Testnet, themelio_bootstrap::bootstrap_routes(NetID::Testnet)[0].to_string())
         } else {
-            NetID::Mainnet
+            (NetID::Mainnet, themelio_bootstrap::bootstrap_routes(NetID::Mainnet)[0].to_string())
         };
+
+        if let Some(rpc_url) = config.themelio_rpc {
+            themelio_rpc = rpc_url;
+        }
 
         let client = ValClient::new(
             network,
             NodeRpcClient(
                 backhaul
-                    .connect(CLI_ARGS.config.as_ref().unwrap().themelio_rpc.clone().into())
+                    .connect(themelio_rpc.into())
                     .await
-                    .unwrap(),
+                    .unwrap()
             ),
         );
 
@@ -199,25 +205,15 @@ async fn freeze(
     Ok(())
 }
 
-// async fn get_header() -> Result<Header> {
+async fn get_header() -> Result<Header> {
+    let snapshot = CLIENT.snapshot().await?;
 
-
-//     Ok(Header{
-//         network: todo!(),
-//         previous: todo!(),
-//         height: todo!(),
-//         history_hash: todo!(),
-//         coins_hash: todo!(),
-//         transactions_hash: todo!(),
-//         fee_pool: todo!(),
-//         fee_multiplier: todo!(),
-//         dosc_speed: todo!(),
-//         pools_hash: todo!(),
-//         stakes_hash: todo!(),
-//     })
-// }
+    Ok(snapshot.current_header())
+}
 
 // async fn get_stakes() -> Result<()> {
+//     let stakes = CLIENT.get_trusted_stakers();
+
 //     Ok(())
 // }
 
@@ -247,6 +243,10 @@ async fn main() -> Result<()> {
     match subcommand {
         Subcommand::FreezeAndMint(args) => {
             freeze(themelio_wallet, twriter, args, dry_run).await?;
+
+            let header = get_header().await?;
+
+            println!("{:#?}", header);
         }
 
         Subcommand::BurnAndThaw(sub_args) => println!("{:?}", sub_args),

@@ -79,7 +79,7 @@ pub struct Config {
     pub ethereum_secret: String,
 
     #[clap(long)]
-    pub themelio_rpc: String,
+    pub themelio_rpc: Option<String>,
 
     #[clap(long)]
     pub themelio_url: String,
@@ -90,7 +90,7 @@ impl Config {
         testnet: bool,
         ethereum_rpc: String,
         ethereum_secret: String,
-        themelio_rpc: String,
+        themelio_rpc: Option<String>,
         themelio_url: String,
     ) -> Config {
         Config {
