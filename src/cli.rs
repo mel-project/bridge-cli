@@ -20,7 +20,7 @@ use themelio_structs::{
 #[clap(group(
     ArgGroup::new("config_file")
         .args(&["config_path"])
-        .args(&["testnet", "ethereum_rpc", "ethereum_secret", "wallet_name"])
+        .args(&["testnet", "ethereum_rpc", "ethereum_secret", "themelio_rpc", "themelio_url"])
         .multiple(false)
 ))]
 pub struct Cli {
@@ -69,17 +69,20 @@ pub struct BurnAndThawArgs {
 
 #[derive(Args, Clone, Debug, Deserialize, Serialize)]
 pub struct Config {
-    #[clap(long, group = "config")]
+    #[clap(long)]
     pub testnet: bool,
 
-    #[clap(long, group = "config")]
-    ethereum_rpc: String,
+    #[clap(long)]
+    pub ethereum_rpc: String,
 
-    #[clap(long, group = "config")]
-    ethereum_secret: String,
+    #[clap(long)]
+    pub ethereum_secret: String,
 
-    #[clap(long, group = "config")]
-    pub wallet_name: String,
+    #[clap(long)]
+    pub themelio_rpc: String,
+
+    #[clap(long)]
+    pub themelio_url: String,
 }
 
 impl Config {
@@ -87,13 +90,15 @@ impl Config {
         testnet: bool,
         ethereum_rpc: String,
         ethereum_secret: String,
-        wallet_name: String,
+        themelio_rpc: String,
+        themelio_url: String,
     ) -> Config {
         Config {
             testnet,
             ethereum_rpc,
             ethereum_secret,
-            wallet_name,
+            themelio_rpc,
+            themelio_url,
         }
     }
 }
@@ -116,7 +121,8 @@ impl TryFrom<Cli> for Config {
                 config.testnet,
                 config.ethereum_rpc,
                 config.ethereum_secret,
-                config.wallet_name
+                config.themelio_rpc,
+                config.themelio_url
             ))
         }
     }

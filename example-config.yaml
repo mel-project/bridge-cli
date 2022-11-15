@@ -1,4 +1,5 @@
 ethereum_rpc: https://ethereum.org 
 ethereum_secret: 0x0000000000000000000000000000000000000000000000000000000000000001
-wallet_name: styx
+themelio_rpc: https://themelio.org
+themelio_url: melwallet://sadministrator.mel
 testnet: false

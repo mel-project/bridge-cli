@@ -1,23 +1,32 @@
 mod cli;
 
-use std::io::{BufReader, Read, Stdin, Write};
-use std::sync::Mutex;
-use std::path::Path;
-use std::convert::TryFrom;
+use std::{
+    convert::TryFrom,
+    io::{BufReader, Read, Stdin, Write},
+    path::Path,
+    sync::Mutex,
+};
 
 use anyhow::Result;
 use clap::Parser;
 use colored::Colorize;
+// use ethers::types::{
+//     Address as EthersAddress,
+//     H160
+// };
+use melnet2::{Backhaul, wire::tcp::TcpBackhaul};
 use melorun::LoadFileError;
 use mil::compiler::{BinCode, Compile};
 use once_cell::sync::Lazy;
 use smol;
 use tabwriter::TabWriter;
+use themelio_nodeprot::{ValClient, NodeRpcClient};
 use themelio_stf::melvm::Covenant;
 use themelio_structs::{
     CoinData,
     CoinID,
     CoinValue,
+    //Header,
     NetID,
     Transaction,
     TxHash,
@@ -28,8 +37,42 @@ use tmelcrypt::HashVal;
 use cli::{*};
 
 const COV_PATH: &str = "bridge-covenants/bridge.melo";
+//const BRIDGE_ADDRESS: EthersAddress = H160([0u8; 20]);
+
 static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
     Lazy::new(|| Mutex::new(BufReader::new(std::io::stdin())));
+
+pub static CLI_ARGS: Lazy<Cli> = Lazy::new(Cli::parse);
+
+/// The global ValClient for talking to the Themelio network
+pub static CLIENT: Lazy<ValClient> = Lazy::new(|| {
+    smol::block_on(async move {
+        let backhaul = TcpBackhaul::new();
+        let testnet = CLI_ARGS.config.as_ref().unwrap().testnet;
+        let network = if testnet {
+            NetID::Testnet
+        } else {
+            NetID::Mainnet
+        };
+
+        let client = ValClient::new(
+            network,
+            NodeRpcClient(
+                backhaul
+                    .connect(CLI_ARGS.config.as_ref().unwrap().themelio_rpc.clone().into())
+                    .await
+                    .unwrap(),
+            ),
+        );
+
+        if testnet {
+            client.trust(themelio_bootstrap::checkpoint_height(NetID::Testnet).unwrap());
+        } else {
+            client.trust(themelio_bootstrap::checkpoint_height(NetID::Mainnet).unwrap());
+        }
+        client
+    })
+});
 
 fn compile_cov() -> Result<Covenant> {
     let cov_path = Path::new(COV_PATH);
@@ -89,10 +132,11 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
         )
         .bright_blue(),
     )?;
+
     Ok(())
 }
 
-async fn freeze_tx(
+async fn send_freeze_tx(
     mut twriter: impl Write,
     wallet_id: String,
     tx: Transaction,
@@ -128,8 +172,8 @@ async fn freeze_tx(
 async fn freeze(
     wallet_id: String,
     mut twriter: impl Write,
-    freeze_args: &FreezeAndMintArgs,
-    dry_run: &bool,
+    freeze_args: FreezeAndMintArgs,
+    dry_run: bool,
 ) -> Result<()> {
     let inputs: Vec<CoinID> = vec!();
     let cov = compile_cov()?;
@@ -146,25 +190,50 @@ async fn freeze(
         .add_output(output)
         .with_fee(fee);
 
-    if *dry_run {
+    if dry_run {
         println!("{}", serde_json::to_string_pretty(&tx)?);
     } else {
-        freeze_tx(&mut twriter, wallet_id, tx.clone()).await?;
-        println!("{}", serde_json::to_string_pretty(&tx)?);
+        send_freeze_tx(&mut twriter, wallet_id, tx.clone()).await?;
     }
 
     Ok(())
 }
 
+// async fn get_header() -> Result<Header> {
+
+
+//     Ok(Header{
+//         network: todo!(),
+//         previous: todo!(),
+//         height: todo!(),
+//         history_hash: todo!(),
+//         coins_hash: todo!(),
+//         transactions_hash: todo!(),
+//         fee_pool: todo!(),
+//         fee_multiplier: todo!(),
+//         dosc_speed: todo!(),
+//         pools_hash: todo!(),
+//         stakes_hash: todo!(),
+//     })
+// }
+
+// async fn get_stakes() -> Result<()> {
+//     Ok(())
+// }
+
+// async fn mint() -> Result<()> {
+
+//     Ok(())
+// }
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let twriter = TabWriter::new(std::io::stderr());
 
-    let args = Cli::parse();
-    let subcommand = &args.subcommand;
-    let dry_run = &args.dry_run;
+    let subcommand = CLI_ARGS.subcommand.clone();
+    let dry_run = CLI_ARGS.dry_run;
 
-    let config = Config::try_from(args.clone())
+    let config = Config::try_from(CLI_ARGS.clone())
         .expect("Unable to create config from CLI args");
 
     let network_id = if config.testnet {
@@ -173,11 +242,11 @@ async fn main() -> Result<()> {
         NetID::Mainnet
     };
 
-    let wallet_id = format!("{}{:?}", config.wallet_name, network_id);
+    let themelio_wallet = format!("{}{:?}", config.themelio_url, network_id);
 
     match subcommand {
         Subcommand::FreezeAndMint(args) => {
-            freeze(wallet_id, twriter, args, dry_run).await?;
+            freeze(themelio_wallet, twriter, args, dry_run).await?;
         }
 
         Subcommand::BurnAndThaw(sub_args) => println!("{:?}", sub_args),
