@@ -1,4 +1,5 @@
 mod cli;
+mod structs;
 
 use std::{
     convert::TryFrom,
@@ -7,7 +8,7 @@ use std::{
     sync::Mutex,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use colored::Colorize;
 // use ethers::types::{
@@ -19,9 +20,10 @@ use melorun::LoadFileError;
 use mil::compiler::{BinCode, Compile};
 use once_cell::sync::Lazy;
 use tabwriter::TabWriter;
-use themelio_nodeprot::{ValClient, NodeRpcClient};
+use themelio_nodeprot::{NodeRpcClient, ValClient};
 use themelio_stf::melvm::Covenant;
 use themelio_structs::{
+    BlockHeight,
     CoinData,
     CoinID,
     CoinValue,
@@ -33,7 +35,8 @@ use themelio_structs::{
 };
 use tmelcrypt::HashVal;
 
-use cli::{*};
+use cli::*;
+use structs::*;
 
 const COV_PATH: &str = "bridge-covenants/bridge.melo";
 //const BRIDGE_ADDRESS: EthersAddress = H160([0u8; 20]);
@@ -41,11 +44,11 @@ const COV_PATH: &str = "bridge-covenants/bridge.melo";
 static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
     Lazy::new(|| Mutex::new(BufReader::new(std::io::stdin())));
 
-pub static CLI_ARGS: Lazy<Cli> = Lazy::new(Cli::parse);
+static CLI_ARGS: Lazy<Cli> = Lazy::new(Cli::parse);
 // pub static CONFIG: Lazy<Config> = Lazy::new(Config::try_from(CLI_ARGS));
 
 /// The global ValClient for talking to the Themelio network
-pub static CLIENT: Lazy<ValClient> = Lazy::new(|| {
+static CLIENT: Lazy<ValClient> = Lazy::new(|| {
     smol::block_on(async move {
         let backhaul = TcpBackhaul::new();
         let config = Config::try_from(CLI_ARGS.to_owned()).unwrap();
@@ -101,7 +104,7 @@ fn compile_cov() -> Result<Covenant> {
     Ok(covenant)
 }
 
-async fn proceed_prompt() -> anyhow::Result<()> {
+async fn proceed_prompt() -> Result<()> {
     eprintln!("Proceed? [y/N] ");
 
     let letter = smol::unblock(move || {
@@ -146,7 +149,7 @@ async fn send_freeze_tx(
     mut twriter: impl Write,
     wallet_id: String,
     tx: Transaction,
-) -> Result<()> {
+) -> Result<BlockHeight> {
     let output = &tx.outputs[0];
 
     writeln!(twriter, "{}", "FREEZING COIN".bold())?;
@@ -169,10 +172,14 @@ async fn send_freeze_tx(
 
     //let tx_hash = wallet.send_tx(tx).await?;
     let tx_hash = TxHash(HashVal::random());
+    let snapshot = CLIENT
+        .snapshot()
+        .await?;
+    let freeze_height = BlockHeight(0);
 
     write_txhash(&mut twriter, &wallet_id, tx_hash)?;
 
-    Ok(())
+    Ok(freeze_height)
 }
 
 async fn freeze(
@@ -180,7 +187,7 @@ async fn freeze(
     mut twriter: impl Write,
     freeze_args: FreezeAndMintArgs,
     dry_run: bool,
-) -> Result<()> {
+) -> Result<FreezeData> {
     let inputs: Vec<CoinID> = vec!();
     let cov = compile_cov()?;
     let output = CoinData{
@@ -191,24 +198,44 @@ async fn freeze(
     };
     let fee = CoinValue(300); // later actually calculate fee
 
+    // will later be replaced with a prepare_tx() from a wallet client
     let tx = Transaction::new(TxKind::Normal)
         .with_inputs(inputs)
         .add_output(output)
         .with_fee(fee);
 
+    let mut freeze_height = BlockHeight(0);
+
     if dry_run {
         println!("{}", serde_json::to_string_pretty(&tx)?);
     } else {
-        send_freeze_tx(&mut twriter, wallet_id, tx.clone()).await?;
+        freeze_height = send_freeze_tx(&mut twriter, wallet_id, tx.clone()).await?;
     }
 
-    Ok(())
+    Ok(FreezeData {
+        freeze_height: freeze_height,
+        freeze_header: todo!(),
+        freeze_tx: todo!(),
+        freeze_stakes: todo!(),
+        historical_headers: todo!()
+    })
 }
 
-async fn get_header() -> Result<Header> {
-    let snapshot = CLIENT.snapshot().await?;
+async fn get_header(block_height: BlockHeight) -> Result<Header> {
+    let snapshot = CLIENT
+        .snapshot()
+        .await?;
+    let mut header = snapshot.current_header();
 
-    Ok(snapshot.current_header())
+    if header.height != block_height {
+        header = if let Ok(fetched_header) = snapshot.get_history(block_height).await {
+            fetched_header.unwrap()
+        } else {
+            header
+        }
+    }
+
+    Ok(header)
 }
 
 // async fn get_stakes() -> Result<()> {
@@ -218,39 +245,37 @@ async fn get_header() -> Result<Header> {
 // }
 
 // async fn mint() -> Result<()> {
-
 //     Ok(())
 // }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let twriter = TabWriter::new(std::io::stderr());
+fn main() -> Result<()> {
+    smol::block_on(async move {
+        let twriter = TabWriter::new(std::io::stderr());
 
-    let subcommand = CLI_ARGS.subcommand.clone();
-    let dry_run = CLI_ARGS.dry_run;
+        let subcommand = CLI_ARGS.subcommand.clone();
+        let dry_run = CLI_ARGS.dry_run;
 
-    let config = Config::try_from(CLI_ARGS.clone())
-        .expect("Unable to create config from CLI args");
+        let config = Config::try_from(CLI_ARGS.clone())
+            .expect("Unable to create config from CLI args");
 
-    let network_id = if config.testnet {
-        NetID::Testnet
-    } else {
-        NetID::Mainnet
-    };
+        let network_id = if config.testnet {
+            NetID::Testnet
+        } else {
+            NetID::Mainnet
+        };
 
-    let themelio_wallet = format!("{}{:?}", config.themelio_url, network_id);
+        let themelio_wallet = format!("{}{:?}", config.themelio_url, network_id);
 
-    match subcommand {
-        Subcommand::FreezeAndMint(args) => {
-            freeze(themelio_wallet, twriter, args, dry_run).await?;
+        match subcommand {
+            Subcommand::FreezeAndMint(args) => {
+                let freeze_data: FreezeData = freeze(themelio_wallet, twriter, args, dry_run).await?;
 
-            let header = get_header().await?;
+                println!("{:#?}", freeze_data);
+            }
 
-            println!("{:#?}", header);
+            Subcommand::BurnAndThaw(sub_args) => println!("{:?}", sub_args),
         }
-
-        Subcommand::BurnAndThaw(sub_args) => println!("{:?}", sub_args),
-    }
+    });
 
     Ok(())
 }
