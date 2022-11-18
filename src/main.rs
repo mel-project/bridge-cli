@@ -145,79 +145,50 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
     Ok(())
 }
 
-async fn send_freeze_tx(
-    mut twriter: impl Write,
-    wallet_id: String,
-    tx: Transaction,
-) -> Result<BlockHeight> {
-    let output = &tx.outputs[0];
+// async fn send_freeze_tx(
+//     mut twriter: impl Write,
+//     wallet_id: String,
+//     tx: Transaction,
+// ) -> Result<BlockHeight> {
+//     let output = &tx.outputs[0];
 
-    writeln!(twriter, "{}", "FREEZING COIN".bold())?;
-    writeln!(twriter, "{}", "Bridge Address\tValue\tDenomination\tAdditional data".italic())?;
+//     writeln!(twriter, "{}", "FREEZING COIN".bold())?;
+//     writeln!(twriter, "{}", "Bridge Address\tValue\tDenomination\tAdditional data".italic())?;
 
-    writeln!(
-        twriter,
-        "{}\t{}\t{}\t{:?}",
-        output.covhash.to_string().bright_blue(),
-        output.value,
-        output.denom,
-        hex::encode(&output.additional_data)
-    )?;
+//     writeln!(
+//         twriter,
+//         "{}\t{}\t{}\t{:?}",
+//         output.covhash.to_string().bright_blue(),
+//         output.value,
+//         output.denom,
+//         hex::encode(&output.additional_data)
+//     )?;
 
-    writeln!(twriter, "{}\t{} MEL", " (network fees)".yellow(), tx.fee)?;
+//     writeln!(twriter, "{}\t{} MEL", " (network fees)".yellow(), tx.fee)?;
 
-    twriter.flush()?;
+//     twriter.flush()?;
 
-    proceed_prompt().await?;
+//     proceed_prompt().await?;
 
-    //let tx_hash = wallet.send_tx(tx).await?;
-    let tx_hash = TxHash(HashVal::random());
-    let snapshot = CLIENT
-        .snapshot()
-        .await?;
-    let freeze_height = BlockHeight(0);
+//     //let tx_hash = wallet.send_tx(tx).await?;
+//     let tx_hash = TxHash(HashVal::random());
+//     let snapshot = CLIENT
+//         .snapshot()
+//         .await?;
+//     let freeze_height = BlockHeight(0);
 
-    write_txhash(&mut twriter, &wallet_id, tx_hash)?;
+//     write_txhash(&mut twriter, &wallet_id, tx_hash)?;
 
-    Ok(freeze_height)
-}
+//     Ok(freeze_height)
+// }
 
-async fn freeze(
-    wallet_id: String,
-    mut twriter: impl Write,
-    freeze_args: FreezeAndMintArgs,
-    dry_run: bool,
-) -> Result<FreezeData> {
-    let inputs: Vec<CoinID> = vec!();
-    let cov = compile_cov()?;
-    let output = CoinData{
-        covhash: cov.hash(),
-        value: freeze_args.value,
-        denom: freeze_args.denom,
-        additional_data: freeze_args.ethereum_recipient.0.into(),
-    };
-    let fee = CoinValue(300); // later actually calculate fee
-
-    // will later be replaced with a prepare_tx() from a wallet client
-    let tx = Transaction::new(TxKind::Normal)
-        .with_inputs(inputs)
-        .add_output(output)
-        .with_fee(fee);
-
-    let mut freeze_height = BlockHeight(0);
-
-    if dry_run {
-        println!("{}", serde_json::to_string_pretty(&tx)?);
-    } else {
-        freeze_height = send_freeze_tx(&mut twriter, wallet_id, tx.clone()).await?;
-    }
-
-    Ok(FreezeData {
-        freeze_height: freeze_height,
+async fn process_freeze(freeze_data: FreezeData) -> Result<MintArgs> {
+    Ok(MintArgs{
+        freeze_height: todo!(),
         freeze_header: todo!(),
         freeze_tx: todo!(),
         freeze_stakes: todo!(),
-        historical_headers: todo!()
+        historical_headers: todo!(),
     })
 }
 
@@ -268,9 +239,11 @@ fn main() -> Result<()> {
 
         match subcommand {
             Subcommand::FreezeAndMint(args) => {
-                let freeze_data: FreezeData = freeze(themelio_wallet, twriter, args, dry_run).await?;
+                let mint_args: MintArgs = process_freeze(args)
+                    .await
+                    .expect("Error processing freeze data");
 
-                println!("{:#?}", freeze_data);
+                println!("{:#?}", mint_args);
             }
 
             Subcommand::BurnAndThaw(sub_args) => println!("{:?}", sub_args),

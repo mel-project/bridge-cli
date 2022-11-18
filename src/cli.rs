@@ -11,8 +11,10 @@ use serde::{Deserialize, Serialize};
 use serde_yaml;
 use themelio_structs::{
     Address as ThemelioAddress,
+    BlockHeight,
     CoinValue,
     Denom,
+    TxHash,
 };
 
 #[derive(Clone, Deserialize, Debug, Parser)]
@@ -39,12 +41,12 @@ pub struct Cli {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, clap::Subcommand)]
 pub enum Subcommand {
-    FreezeAndMint(FreezeAndMintArgs),
+    FreezeAndMint(FreezeData),
     BurnAndThaw(BurnAndThawArgs),
 }
 
 #[derive(Args, Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct FreezeAndMintArgs {
+pub struct FreezeData {
     #[clap(long)]
     pub value: CoinValue,
 
@@ -53,6 +55,12 @@ pub struct FreezeAndMintArgs {
 
     #[clap(long)]
     pub ethereum_recipient: EthersAddress,
+
+    #[clap(long)]
+    pub tx_hash: TxHash,
+
+    #[clap(long)]
+    pub block_height: BlockHeight,
 }
 
 #[derive(Args, Clone, Debug, Deserialize, PartialEq, Serialize)]

@@ -5,7 +5,7 @@ use themelio_structs::{
 };
 
 #[derive(Debug)]
-pub struct FreezeData {
+pub struct MintArgs {
     pub freeze_height: BlockHeight,
     pub freeze_header: Header,
     pub freeze_tx: Transaction,
