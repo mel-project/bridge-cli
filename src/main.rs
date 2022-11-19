@@ -5,16 +5,19 @@ use std::{
     convert::TryFrom,
     io::{BufReader, Read, Stdin, Write},
     path::Path,
-    sync::Mutex,
+    sync::{Mutex, Arc},
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use colored::Colorize;
-// use ethers::types::{
-//     Address as EthersAddress,
-//     H160
-// };
+use ethers::{
+    prelude::SignerMiddleware,
+    providers::{Http, Provider, Middleware},
+    signers::{LocalWallet, Signer},
+    types::{H160, H256, Filter, ValueOrArray},
+    utils::hex::FromHex,
+};
 use melnet2::{Backhaul, wire::tcp::TcpBackhaul};
 use melorun::LoadFileError;
 use mil::compiler::{BinCode, Compile};
@@ -24,22 +27,16 @@ use themelio_nodeprot::{NodeRpcClient, ValClient};
 use themelio_stf::melvm::Covenant;
 use themelio_structs::{
     BlockHeight,
-    CoinData,
-    CoinID,
-    CoinValue,
     Header,
     NetID,
-    Transaction,
-    TxHash,
-    TxKind,
 };
-use tmelcrypt::HashVal;
 
 use cli::*;
 use structs::*;
 
 const COV_PATH: &str = "bridge-covenants/bridge.melo";
-//const BRIDGE_ADDRESS: EthersAddress = H160([0u8; 20]);
+const BRIDGE_ADDRESS: &str = "56E618FB75B9344eFBcD63ef138F90277b1C1593";
+const HEADER_VERIFIED_TOPIC: &str = "8cee0a7da402e70d36d0d5cba99d9b5f4b6490c10ff25c61043cce84c3f1ac01";
 
 static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
     Lazy::new(|| Mutex::new(BufReader::new(std::io::stdin())));
@@ -47,7 +44,6 @@ static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
 static CLI_ARGS: Lazy<Cli> = Lazy::new(Cli::parse);
 // pub static CONFIG: Lazy<Config> = Lazy::new(Config::try_from(CLI_ARGS));
 
-/// The global ValClient for talking to the Themelio network
 static CLIENT: Lazy<ValClient> = Lazy::new(|| {
     smol::block_on(async move {
         let backhaul = TcpBackhaul::new();
@@ -182,7 +178,35 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
 //     Ok(freeze_height)
 // }
 
-async fn process_freeze(freeze_data: FreezeData) -> Result<MintArgs> {
+async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
+    let config = Config::try_from(CLI_ARGS.to_owned())?;
+
+    let eth_provider = Provider::<Http>::try_from(config.ethereum_rpc)?;
+    let chain_id = eth_provider.get_chainid().await?;
+    let eth_wallet: LocalWallet = config.ethereum_secret.parse()?;
+    let eth_wallet = eth_wallet.with_chain_id(chain_id.as_u64());
+    let eth_client = Arc::new(SignerMiddleware::new(eth_provider, eth_wallet));
+
+    //let current_height = eth_client.get_block_number().await?;
+    let filter = Filter{
+        block_option: ethers::types::FilterBlockOption::Range { from_block: None, to_block: None },
+        address: Some(ValueOrArray::Value(H160(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?))),
+        topics: [
+            Some(ValueOrArray::Value(Some(H256(<[u8; 32]>::from_hex(HEADER_VERIFIED_TOPIC)?)))),
+            None,
+            None,
+            None,
+        ],
+    };
+    let logs = eth_client.get_logs(&filter).await?;
+
+    println!("{:?}", logs);
+
+    // let latest_verified_header = 
+
+    let freeze_hash = freeze_data.tx_hash;
+    let freeze_height = freeze_data.block_height;
+
     Ok(MintArgs{
         freeze_height: todo!(),
         freeze_header: todo!(),
@@ -224,29 +248,34 @@ fn main() -> Result<()> {
         let twriter = TabWriter::new(std::io::stderr());
 
         let subcommand = CLI_ARGS.subcommand.clone();
-        let dry_run = CLI_ARGS.dry_run;
+        // let dry_run = CLI_ARGS.dry_run;
 
         let config = Config::try_from(CLI_ARGS.clone())
             .expect("Unable to create config from CLI args");
 
-        let network_id = if config.testnet {
-            NetID::Testnet
-        } else {
-            NetID::Mainnet
-        };
-
-        let themelio_wallet = format!("{}{:?}", config.themelio_url, network_id);
+        // let network_id = if config.testnet {
+        //     NetID::Testnet
+        // } else {
+        //     NetID::Mainnet
+        // };
 
         match subcommand {
-            Subcommand::FreezeAndMint(args) => {
-                let mint_args: MintArgs = process_freeze(args)
+            Subcommand::MintTokens(freeze_data) => {
+                let mint_args: MintArgs = fetch_mintargs(freeze_data)
                     .await
                     .expect("Error processing freeze data");
 
-                println!("{:#?}", mint_args);
+                println!("Tokens minted successfully:\n{:#?}", mint_args);
             }
 
-            Subcommand::BurnAndThaw(sub_args) => println!("{:?}", sub_args),
+            Subcommand::BurnTokens(burn_args) => {
+                // let burn_data = burn_tokens(burn_args).await?;
+                // let thaw_args = fetch_thawargs(burn_data).await?;
+                // let thaw_tx = ...
+
+                println!("Tokens burned successfully:\n{:?}", burn_args);
+                // println!("Here is the tx you need for thawing: {}\nMore info at https://github.com/themeliolabs/bridge-cli", thaw_tx);
+            }
         }
     });
 

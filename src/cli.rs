@@ -5,7 +5,6 @@ use std::{
 
 use anyhow::Result;
 use clap::{ArgGroup, Args, Parser};
-use ethers::types::Address as EthersAddress;
 use melorun::LoadFileError;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
@@ -41,21 +40,12 @@ pub struct Cli {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, clap::Subcommand)]
 pub enum Subcommand {
-    FreezeAndMint(FreezeData),
-    BurnAndThaw(BurnAndThawArgs),
+    MintTokens(FreezeData),
+    BurnTokens(BurnArgs),
 }
 
 #[derive(Args, Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct FreezeData {
-    #[clap(long)]
-    pub value: CoinValue,
-
-    #[clap(long)]
-    pub denom: Denom,
-
-    #[clap(long)]
-    pub ethereum_recipient: EthersAddress,
-
     #[clap(long)]
     pub tx_hash: TxHash,
 
@@ -64,7 +54,7 @@ pub struct FreezeData {
 }
 
 #[derive(Args, Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct BurnAndThawArgs {
+pub struct BurnArgs {
     #[clap(long)]
     pub value: CoinValue,
 
