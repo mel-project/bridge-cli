@@ -29,6 +29,7 @@ use themelio_structs::{
     BlockHeight,
     Header,
     NetID,
+    TxHash,
 };
 
 use cli::*;
@@ -75,6 +76,7 @@ static CLIENT: Lazy<ValClient> = Lazy::new(|| {
         } else {
             client.trust(themelio_bootstrap::checkpoint_height(NetID::Mainnet).unwrap());
         }
+
         client
     })
 });
@@ -179,58 +181,66 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
 // }
 
 async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
-    let config = Config::try_from(CLI_ARGS.to_owned())?;
+    smol::block_on( async move {
+        let config = Config::try_from(CLI_ARGS.to_owned())?;
 
-    let eth_provider = Provider::<Http>::try_from(config.ethereum_rpc)?;
-    let chain_id = eth_provider.get_chainid().await?;
-    let eth_wallet: LocalWallet = config.ethereum_secret.parse()?;
-    let eth_wallet = eth_wallet.with_chain_id(chain_id.as_u64());
-    let eth_client = Arc::new(SignerMiddleware::new(eth_provider, eth_wallet));
+        let eth_provider = Provider::<Http>::try_from(config.ethereum_rpc)?;
+        let eth_chain_id = eth_provider.get_chainid().await?;
 
-    //let current_height = eth_client.get_block_number().await?;
-    let filter = Filter{
-        block_option: ethers::types::FilterBlockOption::Range { from_block: None, to_block: None },
-        address: Some(ValueOrArray::Value(H160(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?))),
-        topics: [
-            Some(ValueOrArray::Value(Some(H256(<[u8; 32]>::from_hex(HEADER_VERIFIED_TOPIC)?)))),
-            None,
-            None,
-            None,
-        ],
-    };
-    let logs = eth_client.get_logs(&filter).await?;
+        let eth_wallet: LocalWallet = config.ethereum_secret.parse()?;
+        let eth_wallet = eth_wallet.with_chain_id(eth_chain_id.as_u64());
+        let eth_client = Arc::new(SignerMiddleware::new(eth_provider, eth_wallet));
 
-    println!("{:?}", logs);
+        //let current_height = eth_client.get_block_number().await?;
+        let filter = Filter{
+            block_option: ethers::types::FilterBlockOption::Range { from_block: None, to_block: None },
+            address: Some(ValueOrArray::Value(H160(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?))),
+            topics: [
+                Some(ValueOrArray::Value(Some(H256(<[u8; 32]>::from_hex(HEADER_VERIFIED_TOPIC)?)))),
+                None,
+                None,
+                None,
+            ],
+        };
 
-    // let latest_verified_header = 
+        let logs = eth_client
+            .get_logs(&filter)
+            .await?;
 
-    let freeze_hash = freeze_data.tx_hash;
-    let freeze_height = freeze_data.block_height;
+        println!("{:?}", logs);
 
-    Ok(MintArgs{
-        freeze_height: todo!(),
-        freeze_header: todo!(),
-        freeze_tx: todo!(),
-        freeze_stakes: todo!(),
-        historical_headers: todo!(),
+        // let latest_verified_header = 
+
+        let freeze_hash = freeze_data.tx_hash;
+        let freeze_height = freeze_data.block_height;
+
+        Ok(MintArgs{
+            freeze_height: todo!(),
+            freeze_header: todo!(),
+            freeze_tx: todo!(),
+            freeze_stakes: todo!(),
+            historical_headers: todo!(),
+        })
     })
 }
 
 async fn get_header(block_height: BlockHeight) -> Result<Header> {
-    let snapshot = CLIENT
-        .snapshot()
-        .await?;
-    let mut header = snapshot.current_header();
+    smol::block_on(async move {
+        let snapshot = CLIENT
+            .snapshot()
+            .await?;
+        let mut header = snapshot.current_header();
 
-    if header.height != block_height {
-        header = if let Ok(fetched_header) = snapshot.get_history(block_height).await {
-            fetched_header.unwrap()
-        } else {
-            header
+        if header.height != block_height {
+            header = if let Ok(fetched_header) = snapshot.get_history(block_height).await {
+                fetched_header.unwrap()
+            } else {
+                header
+            }
         }
-    }
 
-    Ok(header)
+        Ok(header)
+    })
 }
 
 // async fn get_stakes() -> Result<()> {
@@ -258,14 +268,13 @@ fn main() -> Result<()> {
         // } else {
         //     NetID::Mainnet
         // };
-
         match subcommand {
             Subcommand::MintTokens(freeze_data) => {
                 let mint_args: MintArgs = fetch_mintargs(freeze_data)
                     .await
                     .expect("Error processing freeze data");
 
-                println!("Tokens minted successfully:\n{:#?}", mint_args);
+                println!("Tokens minted successfully")
             }
 
             Subcommand::BurnTokens(burn_args) => {
@@ -277,7 +286,7 @@ fn main() -> Result<()> {
                 // println!("Here is the tx you need for thawing: {}\nMore info at https://github.com/themeliolabs/bridge-cli", thaw_tx);
             }
         }
-    });
 
-    Ok(())
+        Ok(())
+    })
 }
