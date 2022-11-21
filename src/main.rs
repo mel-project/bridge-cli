@@ -4,24 +4,27 @@ mod structs;
 use std::{
     convert::TryFrom,
     io::{BufReader, Read, Stdin, Write},
+    ops::Range,
     path::Path,
     sync::{Mutex, Arc},
 };
 
 use anyhow::Result;
+use async_compat::CompatExt;
 use clap::Parser;
 use colored::Colorize;
 use ethers::{
     prelude::SignerMiddleware,
     providers::{Http, Provider, Middleware},
     signers::{LocalWallet, Signer},
-    types::{H160, H256, Filter, ValueOrArray},
+    types::{BlockNumber, H160, H256, Filter, FilterBlockOption, U64, ValueOrArray},
     utils::hex::FromHex,
 };
 use melnet2::{Backhaul, wire::tcp::TcpBackhaul};
 use melorun::LoadFileError;
 use mil::compiler::{BinCode, Compile};
 use once_cell::sync::Lazy;
+// use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tabwriter::TabWriter;
 use themelio_nodeprot::{NodeRpcClient, ValClient};
 use themelio_stf::melvm::Covenant;
@@ -29,6 +32,7 @@ use themelio_structs::{
     BlockHeight,
     Header,
     NetID,
+    Transaction,
     TxHash,
 };
 
@@ -38,6 +42,7 @@ use structs::*;
 const COV_PATH: &str = "bridge-covenants/bridge.melo";
 const BRIDGE_ADDRESS: &str = "56E618FB75B9344eFBcD63ef138F90277b1C1593";
 const HEADER_VERIFIED_TOPIC: &str = "8cee0a7da402e70d36d0d5cba99d9b5f4b6490c10ff25c61043cce84c3f1ac01";
+const CONTRACT_DEPLOYMENT_HEIGHT: BlockNumber = BlockNumber::Number(U64([0x753927]));
 
 static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
     Lazy::new(|| Mutex::new(BufReader::new(std::io::stdin())));
@@ -180,50 +185,6 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
 //     Ok(freeze_height)
 // }
 
-async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
-    smol::block_on( async move {
-        let config = Config::try_from(CLI_ARGS.to_owned())?;
-
-        let eth_provider = Provider::<Http>::try_from(config.ethereum_rpc)?;
-        let eth_chain_id = eth_provider.get_chainid().await?;
-
-        let eth_wallet: LocalWallet = config.ethereum_secret.parse()?;
-        let eth_wallet = eth_wallet.with_chain_id(eth_chain_id.as_u64());
-        let eth_client = Arc::new(SignerMiddleware::new(eth_provider, eth_wallet));
-
-        //let current_height = eth_client.get_block_number().await?;
-        let filter = Filter{
-            block_option: ethers::types::FilterBlockOption::Range { from_block: None, to_block: None },
-            address: Some(ValueOrArray::Value(H160(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?))),
-            topics: [
-                Some(ValueOrArray::Value(Some(H256(<[u8; 32]>::from_hex(HEADER_VERIFIED_TOPIC)?)))),
-                None,
-                None,
-                None,
-            ],
-        };
-
-        let logs = eth_client
-            .get_logs(&filter)
-            .await?;
-
-        println!("{:?}", logs);
-
-        // let latest_verified_header = 
-
-        let freeze_hash = freeze_data.tx_hash;
-        let freeze_height = freeze_data.block_height;
-
-        Ok(MintArgs{
-            freeze_height: todo!(),
-            freeze_header: todo!(),
-            freeze_tx: todo!(),
-            freeze_stakes: todo!(),
-            historical_headers: todo!(),
-        })
-    })
-}
-
 async fn get_header(block_height: BlockHeight) -> Result<Header> {
     smol::block_on(async move {
         let snapshot = CLIENT
@@ -240,6 +201,99 @@ async fn get_header(block_height: BlockHeight) -> Result<Header> {
         }
 
         Ok(header)
+    })
+}
+
+async fn get_tx(tx_hash: TxHash) -> Result<Transaction> {
+    smol::block_on( async move {
+        let snapshot = CLIENT
+            .snapshot()
+            .await?;
+
+        // let tx = snapshot
+        //     .get_transaction(tx_hash)
+        //     .await?
+        //     .expect("Transaction with provided hash does not exist");
+
+        // Ok(tx)
+        Ok(Transaction::empty_test())
+    })
+}
+
+async fn get_stakes(epochs_range: Range<u64>) -> Result<Vec<Vec<u8>>> {
+    smol::block_on(async move {
+        // let snapshot = CLIENT
+        //     .snapshot()
+        //     .await?;
+
+        // let epochs: Vec<StakeDoc> = epochs_range
+        //     .into_par_iter()
+        //     .map(|epoch| async {
+        //         snapshot.get_trusted_stakers(epoch / STAKE_EPOCH)
+        //     })
+        //     .collect();
+
+        //Ok(epochs)
+        Ok(vec!())
+    })
+}
+
+async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
+    smol::block_on( async move {
+        let config = Config::try_from(CLI_ARGS.to_owned())?;
+
+        let freeze_height = freeze_data.block_height;
+        let freeze_header = get_header(freeze_data.block_height).await?;
+        let freeze_tx = get_tx(freeze_data.tx_hash).await?;
+        let freeze_stakes = vec!();//get_stakes(freeze_epoch..freeze_epoch).await?[0].clone();
+
+        let eth_provider = Provider::<Http>::try_from(config.ethereum_rpc)?;
+        let eth_chain_id = eth_provider.get_chainid().compat().await?;
+        let eth_wallet: LocalWallet = config.ethereum_secret.parse()?;
+        let eth_wallet = eth_wallet.with_chain_id(eth_chain_id.as_u64());
+        let eth_client = Arc::new(SignerMiddleware::new(eth_provider, eth_wallet));
+
+        let filter = Filter{
+            block_option: FilterBlockOption::Range {
+                from_block: Some(CONTRACT_DEPLOYMENT_HEIGHT),
+                to_block: Some(BlockNumber::Latest)
+            },
+            address: Some(ValueOrArray::Value(H160(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?))),
+            topics: [
+                Some(ValueOrArray::Value(Some(H256(<[u8; 32]>::from_hex(HEADER_VERIFIED_TOPIC)?)))),
+                None,
+                None,
+                None,
+            ],
+        };
+
+        let logs = eth_client
+            .get_logs(&filter)
+            .await?;
+
+        let highest_verified_height = BlockHeight(
+            logs[0]
+                .block_number
+                .expect("Error retrieving latest verified header")
+                .0[0]
+        );
+
+        if freeze_height.epoch() <= highest_verified_height.epoch() ||
+            freeze_height.epoch() == (highest_verified_height + 1.into()).epoch() {
+            // logic for determining verifier_height
+        } else {
+            // logic for pulling historical headers and stakes
+        }
+
+        Ok(MintArgs{
+            freeze_height: freeze_data.block_height,
+            freeze_header,
+            freeze_tx,
+            freeze_stakes,
+            verifier_height: todo!(),
+            historical_headers: todo!(),
+            historical_stakes: todo!(),
+        })
     })
 }
 
@@ -272,8 +326,9 @@ fn main() -> Result<()> {
             Subcommand::MintTokens(freeze_data) => {
                 let mint_args: MintArgs = fetch_mintargs(freeze_data)
                     .await
-                    .expect("Error processing freeze data");
+                    .expect("Error retrieving data for mint transaction");
 
+                println!("Mintargs: {:#?}", mint_args);
                 println!("Tokens minted successfully")
             }
 
