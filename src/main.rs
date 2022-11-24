@@ -238,11 +238,24 @@ async fn get_stakes(epochs_range: Range<u64>) -> Result<Vec<Vec<u8>>> {
     })
 }
 
+async fn get_historical_headers(range: Range<u64>) -> Result<Vec<Header>> {
+    smol::block_on(async move {
+        Ok(vec!())
+    })
+}
+
+async fn get_historical_stakes(range: Range<u64>) -> Result<Vec<Vec<u8>>> {
+    smol::block_on(async move {
+        Ok(vec!())
+    })
+}
+
 async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
     smol::block_on( async move {
         let config = Config::try_from(CLI_ARGS.to_owned())?;
 
         let freeze_height = freeze_data.block_height;
+        let freeze_epoch = freeze_height.epoch();
         let freeze_header = get_header(freeze_data.block_height).await?;
         let freeze_tx = get_tx(freeze_data.tx_hash).await?;
         let freeze_stakes = vec!();//get_stakes(freeze_epoch..freeze_epoch).await?[0].clone();
@@ -277,22 +290,28 @@ async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
                 .expect("Error retrieving latest verified header")
                 .0[0]
         );
+        let highest_verified_epoch = highest_verified_height.epoch();
 
-        if freeze_height.epoch() <= highest_verified_height.epoch() ||
-            freeze_height.epoch() == (highest_verified_height + 1.into()).epoch() {
-            // logic for determining verifier_height
+        let mut verifier_height = BlockHeight(0);
+        let mut historical_headers: Vec<Header> = vec!();
+        let mut historical_stakes: Vec<Vec<u8>> = vec!();
+
+        if freeze_epoch <= highest_verified_epoch ||
+            freeze_epoch == (highest_verified_height + 1.into()).epoch() {
+            verifier_height = highest_verified_height;
         } else {
-            // logic for pulling historical headers and stakes
+            historical_headers = get_historical_headers(highest_verified_epoch..freeze_epoch).await?;
+            historical_stakes = get_historical_stakes(highest_verified_epoch..freeze_epoch).await?;
         }
 
         Ok(MintArgs{
-            freeze_height: freeze_data.block_height,
+            freeze_height,
             freeze_header,
             freeze_tx,
             freeze_stakes,
-            verifier_height: todo!(),
-            historical_headers: todo!(),
-            historical_stakes: todo!(),
+            verifier_height,
+            historical_headers,
+            historical_stakes,
         })
     })
 }
