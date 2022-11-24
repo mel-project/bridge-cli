@@ -33,7 +33,7 @@ use themelio_structs::{
     Header,
     NetID,
     Transaction,
-    TxHash,
+    TxHash, STAKE_EPOCH,
 };
 
 use cli::*;
@@ -238,13 +238,13 @@ async fn get_stakes(epochs_range: Range<u64>) -> Result<Vec<Vec<u8>>> {
     })
 }
 
-async fn get_historical_headers(range: Range<u64>) -> Result<Vec<Header>> {
+async fn get_historical_headers(range: &Range<u64>) -> Result<Vec<Header>> {
     smol::block_on(async move {
         Ok(vec!())
     })
 }
 
-async fn get_historical_stakes(range: Range<u64>) -> Result<Vec<Vec<u8>>> {
+async fn get_historical_stakes(range: &Range<u64>) -> Result<Vec<Vec<u8>>> {
     smol::block_on(async move {
         Ok(vec!())
     })
@@ -284,24 +284,31 @@ async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
             .get_logs(&filter)
             .await?;
 
-        let highest_verified_height = BlockHeight(
+        let verifier_height = BlockHeight(
             logs[0]
                 .block_number
                 .expect("Error retrieving latest verified header")
                 .0[0]
         );
-        let highest_verified_epoch = highest_verified_height.epoch();
+        let highest_verified_epoch = verifier_height.epoch();
 
-        let mut verifier_height = BlockHeight(0);
+        let history_range: Range<u64>;
         let mut historical_headers: Vec<Header> = vec!();
         let mut historical_stakes: Vec<Vec<u8>> = vec!();
 
+        // if highest verified epoch is the same as freeze epoch then no historical structs needed
         if freeze_epoch <= highest_verified_epoch ||
-            freeze_epoch == (highest_verified_height + 1.into()).epoch() {
-            verifier_height = highest_verified_height;
+            freeze_epoch == (verifier_height + 1.into()).epoch() {
         } else {
-            historical_headers = get_historical_headers(highest_verified_epoch..freeze_epoch).await?;
-            historical_stakes = get_historical_stakes(highest_verified_epoch..freeze_epoch).await?;
+            // if highest verified height is the last block of its epoch, verify the next epoch's penultimate block
+            if (verifier_height + 1.into()).epoch() != highest_verified_epoch {
+                history_range = highest_verified_epoch + 1..freeze_epoch;
+            } else {
+                history_range = highest_verified_epoch..freeze_epoch;
+            }
+
+            historical_headers = get_historical_headers(&history_range).await?;
+            historical_stakes = get_historical_stakes(&history_range).await?;
         }
 
         Ok(MintArgs{
