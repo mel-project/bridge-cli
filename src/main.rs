@@ -20,13 +20,14 @@ use ethers::{
     types::{BlockNumber, H160, H256, Filter, FilterBlockOption, U64, ValueOrArray},
     utils::hex::FromHex,
 };
+use futures::Future;
 use melnet2::{Backhaul, wire::tcp::TcpBackhaul};
 use melorun::LoadFileError;
 use mil::compiler::{BinCode, Compile};
 use once_cell::sync::Lazy;
-// use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tabwriter::TabWriter;
-use themelio_nodeprot::{NodeRpcClient, ValClient};
+use themelio_nodeprot::{NodeRpcClient, ValClient, ValClientError};
 use themelio_stf::melvm::Covenant;
 use themelio_structs::{
     BlockHeight,
@@ -48,7 +49,6 @@ static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
     Lazy::new(|| Mutex::new(BufReader::new(std::io::stdin())));
 
 static CLI_ARGS: Lazy<Cli> = Lazy::new(Cli::parse);
-// pub static CONFIG: Lazy<Config> = Lazy::new(Config::try_from(CLI_ARGS));
 
 static CLIENT: Lazy<ValClient> = Lazy::new(|| {
     smol::block_on(async move {
@@ -175,9 +175,7 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
 
 //     //let tx_hash = wallet.send_tx(tx).await?;
 //     let tx_hash = TxHash(HashVal::random());
-//     let snapshot = CLIENT
-//         .snapshot()
-//         .await?;
+//     let snapshot = CLIENT.snapshot().await?;
 //     let freeze_height = BlockHeight(0);
 
 //     write_txhash(&mut twriter, &wallet_id, tx_hash)?;
@@ -187,17 +185,14 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
 
 async fn get_header(block_height: BlockHeight) -> Result<Header> {
     smol::block_on(async move {
-        let snapshot = CLIENT
-            .snapshot()
-            .await?;
+        let snapshot = CLIENT.snapshot().await?;
         let mut header = snapshot.current_header();
 
         if header.height != block_height {
-            header = if let Ok(fetched_header) = snapshot.get_history(block_height).await {
-                fetched_header.unwrap()
-            } else {
-                header
-            }
+            header = snapshot
+                .get_history(block_height)
+                .await?
+                .expect("Error retrieving header");
         }
 
         Ok(header)
@@ -206,27 +201,20 @@ async fn get_header(block_height: BlockHeight) -> Result<Header> {
 
 async fn get_tx(tx_hash: TxHash) -> Result<Transaction> {
     smol::block_on( async move {
-        let snapshot = CLIENT
-            .snapshot()
-            .await?;
+        let snapshot = CLIENT.snapshot().await?;
 
-        // let tx = snapshot
-        //     .get_transaction(tx_hash)
-        //     .await?
-        //     .expect("Transaction with provided hash does not exist");
+        let tx = snapshot.get_transaction(tx_hash).await?
+            .expect("Transaction with provided hash does not exist");
 
-        // Ok(tx)
-        Ok(Transaction::empty_test())
+        Ok(tx)
     })
 }
 
 async fn get_stakes(epochs_range: Range<u64>) -> Result<Vec<Vec<u8>>> {
     smol::block_on(async move {
-        // let snapshot = CLIENT
-        //     .snapshot()
-        //     .await?;
+        // let snapshot = CLIENT.snapshot().await?;
 
-        // let epochs: Vec<StakeDoc> = epochs_range
+        // let epochs: Vec<Vec<u8>> = epochs_range
         //     .into_par_iter()
         //     .map(|epoch| async {
         //         snapshot.get_trusted_stakers(epoch / STAKE_EPOCH)
@@ -238,11 +226,23 @@ async fn get_stakes(epochs_range: Range<u64>) -> Result<Vec<Vec<u8>>> {
     })
 }
 
-async fn get_historical_headers(range: &Range<u64>) -> Result<Vec<Header>> {
+async fn get_historical_headers(range: Range<u64>) -> Result<Vec<Header>> {
     smol::block_on(async move {
-        Ok(vec!())
+        let headers = futures::future::join_all(
+            range
+            .map(|epoch| async move {
+                let header = get_header(BlockHeight((epoch + 1) * STAKE_EPOCH - 1))
+                    .await
+                    .expect("Error retreiving historical headers");
+
+                header
+            })
+        ).await;
+
+        Ok(headers)
     })
 }
+
 
 async fn get_historical_stakes(range: &Range<u64>) -> Result<Vec<Vec<u8>>> {
     smol::block_on(async move {
@@ -307,7 +307,7 @@ async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
                 history_range = highest_verified_epoch..freeze_epoch;
             }
 
-            historical_headers = get_historical_headers(&history_range).await?;
+            historical_headers = get_historical_headers(history_range.clone()).await?;
             historical_stakes = get_historical_stakes(&history_range).await?;
         }
 

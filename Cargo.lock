@@ -607,6 +607,7 @@ dependencies = [
  "clap 4.0.22",
  "colored",
  "ethers",
+ "futures",
  "hex",
  "melnet2",
  "melodeon",
