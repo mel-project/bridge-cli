@@ -182,6 +182,16 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
 
 //     Ok(freeze_height)
 // }
+async fn get_tx(tx_hash: TxHash) -> Result<Transaction> {
+    smol::block_on( async move {
+        let snapshot = CLIENT.snapshot().await?;
+
+        let tx = snapshot.get_transaction(tx_hash).await?
+            .expect("Transaction with provided hash does not exist");
+
+        Ok(tx)
+    })
+}
 
 async fn get_header(block_height: BlockHeight) -> Result<Header> {
     smol::block_on(async move {
@@ -199,54 +209,41 @@ async fn get_header(block_height: BlockHeight) -> Result<Header> {
     })
 }
 
-async fn get_tx(tx_hash: TxHash) -> Result<Transaction> {
-    smol::block_on( async move {
-        let snapshot = CLIENT.snapshot().await?;
-
-        let tx = snapshot.get_transaction(tx_hash).await?
-            .expect("Transaction with provided hash does not exist");
-
-        Ok(tx)
-    })
+async fn get_stakes(block_height: BlockHeight) -> Result<Vec<u8>> {
+    Ok(vec!())
 }
 
-async fn get_stakes(epochs_range: Range<u64>) -> Result<Vec<Vec<u8>>> {
-    smol::block_on(async move {
-        // let snapshot = CLIENT.snapshot().await?;
-
-        // let epochs: Vec<Vec<u8>> = epochs_range
-        //     .into_par_iter()
-        //     .map(|epoch| async {
-        //         snapshot.get_trusted_stakers(epoch / STAKE_EPOCH)
-        //     })
-        //     .collect();
-
-        //Ok(epochs)
-        Ok(vec!())
-    })
-}
-
-async fn get_historical_headers(range: Range<u64>) -> Result<Vec<Header>> {
+async fn get_historical_headers(epochs: Range<u64>) -> Result<Vec<Header>> {
     smol::block_on(async move {
         let headers = futures::future::join_all(
-            range
-            .map(|epoch| async move {
-                let header = get_header(BlockHeight((epoch + 1) * STAKE_EPOCH - 1))
-                    .await
-                    .expect("Error retreiving historical headers");
+            epochs
+                .map(|epoch| async move {
+                    let header = get_header(BlockHeight((epoch + 1) * STAKE_EPOCH - 1))
+                        .await
+                        .expect("Error retreiving historical headers");
 
-                header
-            })
+                    header
+                })
         ).await;
 
         Ok(headers)
     })
 }
 
-
-async fn get_historical_stakes(range: &Range<u64>) -> Result<Vec<Vec<u8>>> {
+async fn get_historical_stakes(epochs: Range<u64>) -> Result<Vec<Vec<u8>>> {
     smol::block_on(async move {
-        Ok(vec!())
+        let stakes_vec = futures::future::join_all(
+            epochs
+            .map(|epoch| async move {
+                let stakes = get_stakes(BlockHeight((epoch + 1) * STAKE_EPOCH - 1))
+                    .await
+                    .expect("Error retreiving historical stakes");
+
+                stakes
+            })
+        ).await;
+
+        Ok(stakes_vec)
     })
 }
 
@@ -308,7 +305,7 @@ async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
             }
 
             historical_headers = get_historical_headers(history_range.clone()).await?;
-            historical_stakes = get_historical_stakes(&history_range).await?;
+            historical_stakes = get_historical_stakes(history_range).await?;
         }
 
         Ok(MintArgs{
