@@ -11,6 +11,7 @@ use std::{
 
 use anyhow::Result;
 use async_compat::CompatExt;
+use bindings::themelio_bridge::ThemelioBridge;
 use clap::Parser;
 use colored::Colorize;
 use ethers::{
@@ -343,7 +344,7 @@ async fn fetch_mintargs(config: &Config, freeze_data: FreezeData) -> Result<Mint
 
 async fn mint_tokens(config: &Config, mint_args: MintArgs) -> Result<()> {
     smol::block_on(async {
-        // let bridge_contract = 
+        let bridge_contract = ThemelioBridge::new(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?, ETH_CLIENT.clone());
 
         Ok(())
     })

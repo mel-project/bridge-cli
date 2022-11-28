@@ -1,3 +1,6 @@
 [submodule "bridge-covenants"]
 	path = bridge-covenants
 	url = https://github.com/themeliolabs/bridge-covenants
+[submodule "bridge-sol"]
+	path = bridge-sol
+	url = https://github.com/themeliolabs/bridge-sol

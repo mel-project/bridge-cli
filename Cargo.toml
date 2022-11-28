@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.66"
 async-compat = "0.2.1"
+bindings = { path = "./bindings" }
 clap = { version = "4.0.22", features = ["derive"] }
 colored = "2.0.0"
 ethers = { version = "1.0.1", features = ["rustls"] }
