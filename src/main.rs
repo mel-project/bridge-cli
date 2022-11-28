@@ -347,7 +347,20 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<()> {
         let freeze_stakes = Bytes(header_args.stakes.into());
         let freeze_signatures = header_args.signatures;
 
-        let freeze_stakes_receipt = bridge_contract.verify_stakes(freeze_stakes);
+        let freeze_stakes_tx = bridge_contract.verify_stakes(freeze_stakes.clone());
+        let freeze_stakes_receipt = freeze_stakes_tx.send().await?;
+
+        println!("{:#?}", freeze_stakes_receipt);
+
+        let freeze_header_tx = bridge_contract.verify_header(
+            verifier_height,
+            freeze_header,
+            freeze_stakes,
+            freeze_signatures
+        );
+        let freeze_header_receipt = freeze_header_tx.send().await?;
+
+        println!("{:#?}", freeze_header_receipt);
 
         Ok(())
     })
