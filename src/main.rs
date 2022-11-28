@@ -10,7 +10,6 @@ use std::{
 };
 
 use anyhow::Result;
-use async_compat::CompatExt;
 use bindings::themelio_bridge::ThemelioBridge;
 use clap::Parser;
 use colored::Colorize;
@@ -18,17 +17,16 @@ use ethers::{
     prelude::SignerMiddleware,
     providers::{Http, Provider, Middleware},
     signers::{LocalWallet, Signer},
-    types::{BlockNumber, H160, H256, Filter, FilterBlockOption, U64, ValueOrArray},
+    types::{BlockNumber, H160, H256, Filter, FilterBlockOption, U64, U256, ValueOrArray, Bytes},
     utils::hex::FromHex,
 };
-use futures::Future;
 use melnet2::{Backhaul, wire::tcp::TcpBackhaul};
 use melorun::LoadFileError;
 use mil::compiler::{BinCode, Compile};
 use once_cell::sync::Lazy;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use stdcode::StdcodeSerializeExt;
 use tabwriter::TabWriter;
-use themelio_nodeprot::{NodeRpcClient, ValClient, ValClientError};
+use themelio_nodeprot::{NodeRpcClient, ValClient};
 use themelio_stf::melvm::Covenant;
 use themelio_structs::{
     BlockHeight,
@@ -171,41 +169,6 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
     Ok(())
 }
 
-// async fn send_freeze_tx(
-//     mut twriter: impl Write,
-//     wallet_id: String,
-//     tx: Transaction,
-// ) -> Result<BlockHeight> {
-//     let output = &tx.outputs[0];
-
-//     writeln!(twriter, "{}", "FREEZING COIN".bold())?;
-//     writeln!(twriter, "{}", "Bridge Address\tValue\tDenomination\tAdditional data".italic())?;
-
-//     writeln!(
-//         twriter,
-//         "{}\t{}\t{}\t{:?}",
-//         output.covhash.to_string().bright_blue(),
-//         output.value,
-//         output.denom,
-//         hex::encode(&output.additional_data)
-//     )?;
-
-//     writeln!(twriter, "{}\t{} MEL", " (network fees)".yellow(), tx.fee)?;
-
-//     twriter.flush()?;
-
-//     proceed_prompt().await?;
-
-//     //let tx_hash = wallet.send_tx(tx).await?;
-//     let tx_hash = TxHash(HashVal::random());
-//     let snapshot = CLIENT.snapshot().await?;
-//     let freeze_height = BlockHeight(0);
-
-//     write_txhash(&mut twriter, &wallet_id, tx_hash)?;
-
-//     Ok(freeze_height)
-// }
-
 async fn get_tx(tx_hash: TxHash) -> Result<Transaction> {
     smol::block_on( async move {
         let snapshot = THE_CLIENT.snapshot().await?;
@@ -237,6 +200,10 @@ async fn get_stakes(block_height: BlockHeight) -> Result<Vec<u8>> {
     Ok(vec!())
 }
 
+async fn get_signatures(block_height: BlockHeight) -> Result<Vec<[u8; 32]>> {
+    Ok(vec!())
+}
+
 async fn get_historical_headers(epochs: Range<u64>) -> Result<Vec<Header>> {
     smol::block_on(async move {
         let headers = futures::future::join_all(
@@ -258,32 +225,43 @@ async fn get_historical_stakes(epochs: Range<u64>) -> Result<Vec<Vec<u8>>> {
     smol::block_on(async move {
         let stakes_vec = futures::future::join_all(
             epochs
-            .map(|epoch| async move {
-                let stakes = get_stakes(BlockHeight((epoch + 1) * STAKE_EPOCH - 1))
-                    .await
-                    .expect("Error retreiving historical stakes");
+                .map(|epoch| async move {
+                    let stakes = get_stakes(BlockHeight((epoch + 1) * STAKE_EPOCH - 1))
+                        .await
+                        .expect("Error retreiving historical stakes");
 
-                stakes
-            })
+                    stakes
+                })
         ).await;
 
         Ok(stakes_vec)
     })
 }
 
-async fn fetch_mintargs(config: &Config, freeze_data: FreezeData) -> Result<MintArgs> {
+async fn get_historical_signatures(epochs: Range<u64>) -> Result<Vec<Vec<[u8; 32]>>> {
+    smol::block_on(async {
+        let signatures = futures::future::join_all(
+            epochs
+                .map(|epoch| async move {
+                    let signature = get_signatures(BlockHeight((epoch + 1) * STAKE_EPOCH - 1))
+                        .await
+                        .expect("Error retreiving historical signatures");
+
+                    signature
+                })
+        ).await;
+
+        Ok(signatures)
+    })
+}
+
+async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
     smol::block_on( async move {
         let freeze_height = freeze_data.block_height;
         let freeze_epoch = freeze_height.epoch();
-        let freeze_header = get_header(freeze_data.block_height).await?;
+        let freeze_header = get_header(freeze_height).await?;
         let freeze_tx = get_tx(freeze_data.tx_hash).await?;
-        let freeze_stakes = vec!();//get_stakes(freeze_epoch..freeze_epoch).await?[0].clone();
-
-        let eth_provider = Provider::<Http>::try_from(config.ethereum_rpc.clone())?;
-        let eth_chain_id = eth_provider.get_chainid().compat().await?;
-        let eth_wallet: LocalWallet = config.ethereum_secret.parse()?;
-        let eth_wallet = eth_wallet.with_chain_id(eth_chain_id.as_u64());
-        let eth_client = Arc::new(SignerMiddleware::new(eth_provider, eth_wallet));
+        let freeze_stakes = get_stakes(freeze_height).await?;
 
         let filter = Filter{
             block_option: FilterBlockOption::Range {
@@ -299,7 +277,7 @@ async fn fetch_mintargs(config: &Config, freeze_data: FreezeData) -> Result<Mint
             ],
         };
 
-        let logs = eth_client
+        let logs = ETH_CLIENT
             .get_logs(&filter)
             .await?;
 
@@ -314,6 +292,7 @@ async fn fetch_mintargs(config: &Config, freeze_data: FreezeData) -> Result<Mint
         let history_range: Range<u64>;
         let mut historical_headers: Vec<Header> = vec!();
         let mut historical_stakes: Vec<Vec<u8>> = vec!();
+        let mut historical_signatures: Vec<Vec<[u8; 32]>> = vec!();
 
         // if highest verified epoch is the same as freeze epoch then no historical structs needed
         if freeze_epoch <= highest_verified_epoch ||
@@ -327,24 +306,48 @@ async fn fetch_mintargs(config: &Config, freeze_data: FreezeData) -> Result<Mint
             }
 
             historical_headers = get_historical_headers(history_range.clone()).await?;
-            historical_stakes = get_historical_stakes(history_range).await?;
+            historical_stakes = get_historical_stakes(history_range.clone()).await?;
+            historical_signatures = get_historical_signatures(history_range).await?;
         }
 
         Ok(MintArgs{
-            freeze_height,
-            freeze_header,
-            freeze_tx,
-            freeze_stakes,
-            verifier_height,
-            historical_headers,
-            historical_stakes,
+            header_args: todo!(),
+            historical_header_args: todo!(),
         })
     })
 }
 
-async fn mint_tokens(config: &Config, mint_args: MintArgs) -> Result<()> {
+async fn mint_tokens(mint_args: MintArgs) -> Result<()> {
     smol::block_on(async {
         let bridge_contract = ThemelioBridge::new(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?, ETH_CLIENT.clone());
+
+        // submit historical stakes and headers
+        let header_args = mint_args.header_args;
+        let historical_header_args = mint_args.historical_header_args;
+
+        let hist_header_receipts = futures::future::join_all(
+            historical_header_args
+                .into_iter()
+                .map(|historical_args| async {
+                    (
+                        bridge_contract.verify_stakes(Bytes(historical_args.clone().stakes.into())),
+                        bridge_contract.verify_header(
+                            U256::from(historical_args.verifier_height.0),
+                            Bytes(historical_args.header.stdcode().into()),
+                            Bytes(historical_args.stakes.into()),
+                            historical_args.signatures
+                        )
+                    )
+                })
+        ).await;
+
+        // submit freeze stakes, header, and tx
+        let verifier_height = U256::from(header_args.verifier_height.0);
+        let freeze_header = Bytes(header_args.header.stdcode().into());
+        let freeze_stakes = Bytes(header_args.stakes.into());
+        let freeze_signatures = header_args.signatures;
+
+        let freeze_stakes_receipt = bridge_contract.verify_stakes(freeze_stakes);
 
         Ok(())
     })
@@ -357,15 +360,12 @@ fn main() -> Result<()> {
         let subcommand = CLI_ARGS.subcommand.clone();
         let dry_run = CLI_ARGS.dry_run;
 
-        let config = Config::try_from(CLI_ARGS.clone())
-            .expect("Unable to create config from CLI args");
-
         match subcommand {
             Subcommand::MintTokens(freeze_data) => {
-                let mint_args: MintArgs = fetch_mintargs(&config, freeze_data).await?;
+                let mint_args: MintArgs = fetch_mintargs(freeze_data).await?;
                 println!("Mintargs: {:#?}", mint_args);
 
-                let mint_receipt = mint_tokens(&config, mint_args).await?;
+                let mint_receipt = mint_tokens(mint_args).await?;
                 println!("Tokens minted successfully:\n{:#?}", mint_receipt);
             }
 
