@@ -50,7 +50,7 @@ static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
 
 static CLI_ARGS: Lazy<Cli> = Lazy::new(Cli::parse);
 
-static CLIENT: Lazy<ValClient> = Lazy::new(|| {
+static THE_CLIENT: Lazy<ValClient> = Lazy::new(|| {
     smol::block_on(async move {
         let backhaul = TcpBackhaul::new();
         let config = Config::try_from(CLI_ARGS.to_owned()).unwrap();
@@ -81,6 +81,28 @@ static CLIENT: Lazy<ValClient> = Lazy::new(|| {
         } else {
             client.trust(themelio_bootstrap::checkpoint_height(NetID::Mainnet).unwrap());
         }
+
+        client
+    })
+});
+
+static ETH_CLIENT: Lazy<Arc<SignerMiddleware<Provider<Http>, LocalWallet>>> = Lazy::new(|| {
+    smol::block_on(async {
+        let config = Config::try_from(CLI_ARGS.to_owned()).unwrap();
+
+        let provider = Provider::<Http>::try_from(config.ethereum_rpc.clone()).unwrap();
+
+        let chain_id = provider
+            .get_chainid()
+            .await
+            .unwrap()
+            .as_u64();
+
+        let wallet: LocalWallet = config.ethereum_secret.parse().unwrap();
+        let wallet = wallet.with_chain_id(chain_id);
+
+        let client = SignerMiddleware::new(provider, wallet);
+        let client = Arc::new(client);
 
         client
     })
@@ -182,9 +204,10 @@ fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyh
 
 //     Ok(freeze_height)
 // }
+
 async fn get_tx(tx_hash: TxHash) -> Result<Transaction> {
     smol::block_on( async move {
-        let snapshot = CLIENT.snapshot().await?;
+        let snapshot = THE_CLIENT.snapshot().await?;
 
         let tx = snapshot.get_transaction(tx_hash).await?
             .expect("Transaction with provided hash does not exist");
@@ -195,7 +218,7 @@ async fn get_tx(tx_hash: TxHash) -> Result<Transaction> {
 
 async fn get_header(block_height: BlockHeight) -> Result<Header> {
     smol::block_on(async move {
-        let snapshot = CLIENT.snapshot().await?;
+        let snapshot = THE_CLIENT.snapshot().await?;
         let mut header = snapshot.current_header();
 
         if header.height != block_height {
@@ -247,17 +270,15 @@ async fn get_historical_stakes(epochs: Range<u64>) -> Result<Vec<Vec<u8>>> {
     })
 }
 
-async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
+async fn fetch_mintargs(config: &Config, freeze_data: FreezeData) -> Result<MintArgs> {
     smol::block_on( async move {
-        let config = Config::try_from(CLI_ARGS.to_owned())?;
-
         let freeze_height = freeze_data.block_height;
         let freeze_epoch = freeze_height.epoch();
         let freeze_header = get_header(freeze_data.block_height).await?;
         let freeze_tx = get_tx(freeze_data.tx_hash).await?;
         let freeze_stakes = vec!();//get_stakes(freeze_epoch..freeze_epoch).await?[0].clone();
 
-        let eth_provider = Provider::<Http>::try_from(config.ethereum_rpc)?;
+        let eth_provider = Provider::<Http>::try_from(config.ethereum_rpc.clone())?;
         let eth_chain_id = eth_provider.get_chainid().compat().await?;
         let eth_wallet: LocalWallet = config.ethereum_secret.parse()?;
         let eth_wallet = eth_wallet.with_chain_id(eth_chain_id.as_u64());
@@ -320,39 +341,31 @@ async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
     })
 }
 
-// async fn get_stakes() -> Result<()> {
-//     let stakes = CLIENT.get_trusted_stakers();
+async fn mint_tokens(config: &Config, mint_args: MintArgs) -> Result<()> {
+    smol::block_on(async {
+        // let bridge_contract = 
 
-//     Ok(())
-// }
-
-// async fn mint() -> Result<()> {
-//     Ok(())
-// }
+        Ok(())
+    })
+}
 
 fn main() -> Result<()> {
     smol::block_on(async move {
         let twriter = TabWriter::new(std::io::stderr());
 
         let subcommand = CLI_ARGS.subcommand.clone();
-        // let dry_run = CLI_ARGS.dry_run;
+        let dry_run = CLI_ARGS.dry_run;
 
         let config = Config::try_from(CLI_ARGS.clone())
             .expect("Unable to create config from CLI args");
 
-        // let network_id = if config.testnet {
-        //     NetID::Testnet
-        // } else {
-        //     NetID::Mainnet
-        // };
         match subcommand {
             Subcommand::MintTokens(freeze_data) => {
-                let mint_args: MintArgs = fetch_mintargs(freeze_data)
-                    .await
-                    .expect("Error retrieving data for mint transaction");
-
+                let mint_args: MintArgs = fetch_mintargs(&config, freeze_data).await?;
                 println!("Mintargs: {:#?}", mint_args);
-                println!("Tokens minted successfully")
+
+                let mint_receipt = mint_tokens(&config, mint_args).await?;
+                println!("Tokens minted successfully:\n{:#?}", mint_receipt);
             }
 
             Subcommand::BurnTokens(burn_args) => {
