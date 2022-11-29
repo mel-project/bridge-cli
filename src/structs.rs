@@ -1,6 +1,7 @@
 use themelio_structs::{
     BlockHeight,
     Header,
+    Transaction,
 };
 
 #[derive(Clone, Debug)]
@@ -13,7 +14,16 @@ pub struct HeaderVerificationArgs {
 }
 
 #[derive(Debug)]
+pub struct TxVerificationArgs {
+    pub transaction: Transaction,
+    pub tx_index: u32,
+    pub block_height: BlockHeight,
+    pub proof: Vec<[u8; 32]>,
+}
+
+#[derive(Debug)]
 pub struct MintArgs {
-    pub header_args: HeaderVerificationArgs,
     pub historical_header_args: Vec<HeaderVerificationArgs>,
+    pub header_args: HeaderVerificationArgs,
+    pub tx_args: TxVerificationArgs,
 }

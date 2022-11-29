@@ -17,7 +17,7 @@ use ethers::{
     prelude::SignerMiddleware,
     providers::{Http, Provider, Middleware},
     signers::{LocalWallet, Signer},
-    types::{BlockNumber, H160, H256, Filter, FilterBlockOption, U64, U256, ValueOrArray, Bytes},
+    types::{BlockNumber, Bytes, Filter, FilterBlockOption, H160, H256, TransactionReceipt, U64, U256, ValueOrArray},
     utils::hex::FromHex,
 };
 use melnet2::{Backhaul, wire::tcp::TcpBackhaul};
@@ -311,19 +311,21 @@ async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
         }
 
         Ok(MintArgs{
-            header_args: todo!(),
             historical_header_args: todo!(),
+            header_args: todo!(),
+            tx_args: todo!(),
         })
     })
 }
 
-async fn mint_tokens(mint_args: MintArgs) -> Result<()> {
+async fn mint_tokens(mint_args: MintArgs) -> Result<TransactionReceipt> {
     smol::block_on(async {
         let bridge_contract = ThemelioBridge::new(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?, ETH_CLIENT.clone());
 
         // submit historical stakes and headers
-        let header_args = mint_args.header_args;
         let historical_header_args = mint_args.historical_header_args;
+        let header_args = mint_args.header_args;
+        let tx_args = mint_args.tx_args;
 
         let hist_header_receipts = futures::future::join_all(
             historical_header_args
@@ -348,7 +350,10 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<()> {
         let freeze_signatures = header_args.signatures;
 
         let freeze_stakes_tx = bridge_contract.verify_stakes(freeze_stakes.clone());
-        let freeze_stakes_receipt = freeze_stakes_tx.send().await?;
+        let freeze_stakes_receipt = freeze_stakes_tx
+            .send()
+            .await?
+            .await?;
 
         println!("{:#?}", freeze_stakes_receipt);
 
@@ -358,11 +363,31 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<()> {
             freeze_stakes,
             freeze_signatures
         );
-        let freeze_header_receipt = freeze_header_tx.send().await?;
+        let freeze_header_receipt = freeze_header_tx
+            .send()
+            .await?
+            .await?;
 
         println!("{:#?}", freeze_header_receipt);
 
-        Ok(())
+        let transaction = Bytes(tx_args.transaction.stdcode().into());
+        let tx_index = U256::from(tx_args.tx_index);
+        let block_height = U256::from(tx_args.block_height.0);
+        let proof = tx_args.proof;
+
+        let freeze_tx_tx = bridge_contract.verify_tx(
+            transaction,
+            tx_index,
+            block_height,
+            proof
+        );
+        let freeze_tx_receipt = freeze_tx_tx
+            .send()
+            .await?
+            .await?
+            .expect("Error minting tokens");
+
+        Ok(freeze_tx_receipt)
     })
 }
 
