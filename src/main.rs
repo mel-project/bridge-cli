@@ -39,12 +39,12 @@ use themelio_structs::{
 use cli::*;
 use structs::*;
 
-const COV_PATH: &str = "bridge-covenants/bridge.melo";
+const _COV_PATH: &str = "bridge-covenants/bridge.melo";
 const BRIDGE_ADDRESS: &str = "56E618FB75B9344eFBcD63ef138F90277b1C1593";
 const HEADER_VERIFIED_TOPIC: &str = "8cee0a7da402e70d36d0d5cba99d9b5f4b6490c10ff25c61043cce84c3f1ac01";
 const CONTRACT_DEPLOYMENT_HEIGHT: BlockNumber = BlockNumber::Number(U64([0x753927]));
 
-static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
+static _STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
     Lazy::new(|| Mutex::new(BufReader::new(std::io::stdin())));
 
 static CLI_ARGS: Lazy<Cli> = Lazy::new(Cli::parse);
@@ -107,8 +107,8 @@ static ETH_CLIENT: Lazy<Arc<SignerMiddleware<Provider<Http>, LocalWallet>>> = La
     })
 });
 
-fn compile_cov() -> Result<Covenant> {
-    let cov_path = Path::new(COV_PATH);
+fn _compile_cov() -> Result<Covenant> {
+    let cov_path = Path::new(_COV_PATH);
 
     let melo_str = std::fs::read_to_string(cov_path)
         .map_err(LoadFileError::IoError)?;
@@ -128,13 +128,13 @@ fn compile_cov() -> Result<Covenant> {
     Ok(covenant)
 }
 
-async fn proceed_prompt() -> Result<()> {
+async fn _proceed_prompt() -> Result<()> {
     eprintln!("Proceed? [y/N] ");
 
     let letter = smol::unblock(move || {
         let mut letter = [0u8; 1];
 
-        match STDIN_BUFFER.lock().as_deref_mut() {
+        match _STDIN_BUFFER.lock().as_deref_mut() {
             Ok(stdin) => {
                 while letter[0].is_ascii_whitespace() || letter[0] == 0 {
                     stdin.read_exact(&mut letter)?;
@@ -154,7 +154,7 @@ async fn proceed_prompt() -> Result<()> {
     Ok(())
 }
 
-fn write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyhow::Result<()> {
+fn _write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyhow::Result<()> {
     writeln!(out, "Transaction hash:\t{}", txhash.to_string().bold())?;
     writeln!(
         out,
@@ -196,62 +196,52 @@ async fn get_header(block_height: BlockHeight) -> Result<Header> {
     })
 }
 
-async fn get_stakes(block_height: BlockHeight) -> Result<Vec<u8>> {
+async fn get_stakes(_block_height: BlockHeight) -> Result<Vec<u8>> {
     Ok(vec!())
 }
 
-async fn get_signatures(block_height: BlockHeight) -> Result<Vec<[u8; 32]>> {
+async fn get_signatures(_block_height: BlockHeight) -> Result<Vec<[u8; 32]>> {
     Ok(vec!())
 }
 
-async fn get_historical_headers(epochs: Range<u64>) -> Result<Vec<Header>> {
-    smol::block_on(async move {
-        let headers = futures::future::join_all(
-            epochs
-                .map(|epoch| async move {
-                    let header = get_header(BlockHeight((epoch + 1) * STAKE_EPOCH - 1))
-                        .await
-                        .expect("Error retreiving historical headers");
-
-                    header
-                })
-        ).await;
-
-        Ok(headers)
+async fn get_proof(_block_height: BlockHeight, _tx_hash: TxHash) -> Result<MerkleProof> {
+    Ok(MerkleProof {
+        bytes: vec!(),
+        tx_index: 0
     })
 }
 
-async fn get_historical_stakes(epochs: Range<u64>) -> Result<Vec<Vec<u8>>> {
+async fn get_historical_data(epochs: Range<u64>, base_verifier_height: BlockHeight) -> Result<Vec<HeaderVerificationArgs>> {
     smol::block_on(async move {
-        let stakes_vec = futures::future::join_all(
+        let mut historical_data = futures::future::join_all(
             epochs
                 .map(|epoch| async move {
-                    let stakes = get_stakes(BlockHeight((epoch + 1) * STAKE_EPOCH - 1))
+                    let block_height = BlockHeight((epoch + 1) * STAKE_EPOCH - 1);
+
+                    let header = get_header(block_height)
+                        .await
+                        .expect("Error retreiving historical header");
+
+                    let stakes = get_stakes(block_height)
                         .await
                         .expect("Error retreiving historical stakes");
 
-                    stakes
-                })
-        ).await;
-
-        Ok(stakes_vec)
-    })
-}
-
-async fn get_historical_signatures(epochs: Range<u64>) -> Result<Vec<Vec<[u8; 32]>>> {
-    smol::block_on(async {
-        let signatures = futures::future::join_all(
-            epochs
-                .map(|epoch| async move {
-                    let signature = get_signatures(BlockHeight((epoch + 1) * STAKE_EPOCH - 1))
+                    let signatures = get_signatures(block_height)
                         .await
                         .expect("Error retreiving historical signatures");
 
-                    signature
+                    HeaderVerificationArgs {
+                        header,
+                        verifier_height: block_height - STAKE_EPOCH.into(),
+                        stakes,
+                        signatures,
+                    }
                 })
         ).await;
 
-        Ok(signatures)
+        historical_data[0].verifier_height = base_verifier_height;
+
+        Ok(historical_data)
     })
 }
 
@@ -262,6 +252,8 @@ async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
         let freeze_header = get_header(freeze_height).await?;
         let freeze_tx = get_tx(freeze_data.tx_hash).await?;
         let freeze_stakes = get_stakes(freeze_height).await?;
+        let freeze_signatures = get_signatures(freeze_height).await?;
+        let freeze_proof = get_proof(freeze_height, freeze_tx.hash_nosigs()).await?;
 
         let filter = Filter{
             block_option: FilterBlockOption::Range {
@@ -281,39 +273,47 @@ async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
             .get_logs(&filter)
             .await?;
 
-        let verifier_height = BlockHeight(
+        let highest_verified_height = BlockHeight(
             logs[0]
                 .block_number
                 .expect("Error retrieving latest verified header")
                 .0[0]
         );
-        let highest_verified_epoch = verifier_height.epoch();
+        let highest_verified_epoch = highest_verified_height.epoch();
 
+        let verifier_height: BlockHeight;
         let history_range: Range<u64>;
-        let mut historical_headers: Vec<Header> = vec!();
-        let mut historical_stakes: Vec<Vec<u8>> = vec!();
-        let mut historical_signatures: Vec<Vec<[u8; 32]>> = vec!();
+        let mut historical_data: Vec<HeaderVerificationArgs> = vec!();
 
         // if highest verified epoch is the same as freeze epoch then no historical structs needed
-        if freeze_epoch <= highest_verified_epoch ||
-            freeze_epoch == (verifier_height + 1.into()).epoch() {
+        if freeze_epoch <= highest_verified_epoch || freeze_epoch == (highest_verified_height + 1.into()).epoch() {
+                verifier_height = highest_verified_height;
         } else {
             // if highest verified height is the last block of its epoch, verify the next epoch's penultimate block
-            if (verifier_height + 1.into()).epoch() != highest_verified_epoch {
+            if (highest_verified_height + 1.into()).epoch() != highest_verified_epoch {
                 history_range = highest_verified_epoch + 1..freeze_epoch;
             } else {
                 history_range = highest_verified_epoch..freeze_epoch;
             }
 
-            historical_headers = get_historical_headers(history_range.clone()).await?;
-            historical_stakes = get_historical_stakes(history_range.clone()).await?;
-            historical_signatures = get_historical_signatures(history_range).await?;
+            historical_data = get_historical_data(history_range.clone(), highest_verified_height).await?;
+            verifier_height = historical_data[historical_data.len() - 1].header.height;
         }
 
         Ok(MintArgs{
-            historical_header_args: todo!(),
-            header_args: todo!(),
-            tx_args: todo!(),
+            historical_header_args: historical_data,
+            header_args: HeaderVerificationArgs {
+                header: freeze_header,
+                verifier_height,
+                stakes: freeze_stakes,
+                signatures: freeze_signatures
+            },
+            tx_args: TxVerificationArgs {
+                transaction: freeze_tx,
+                tx_index: freeze_proof.tx_index,
+                block_height: freeze_height,
+                proof: freeze_proof.bytes
+            },
         })
     })
 }
@@ -342,6 +342,8 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<TransactionReceipt> {
                     )
                 })
         ).await;
+
+        println!("{:#?}", hist_header_receipts);
 
         // submit freeze stakes, header, and tx
         let verifier_height = U256::from(header_args.verifier_height.0);

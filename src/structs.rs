@@ -6,7 +6,6 @@ use themelio_structs::{
 
 #[derive(Clone, Debug)]
 pub struct HeaderVerificationArgs {
-    pub header_height: BlockHeight,
     pub header: Header,
     pub verifier_height: BlockHeight,
     pub stakes: Vec<u8>,
@@ -26,4 +25,10 @@ pub struct MintArgs {
     pub historical_header_args: Vec<HeaderVerificationArgs>,
     pub header_args: HeaderVerificationArgs,
     pub tx_args: TxVerificationArgs,
+}
+
+#[derive(Debug)]
+pub struct MerkleProof {
+    pub bytes: Vec<[u8; 32]>,
+    pub tx_index: u32,
 }
