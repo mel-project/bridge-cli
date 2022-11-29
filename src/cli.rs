@@ -56,12 +56,6 @@ pub struct FreezeData {
 #[derive(Args, Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct BurnArgs {
     #[clap(long)]
-    pub value: CoinValue,
-
-    #[clap(long)]
-    pub denom: Denom,
-
-    #[clap(long)]
     pub themelio_recipient: ThemelioAddress,
 }
 

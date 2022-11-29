@@ -17,7 +17,7 @@ use ethers::{
     prelude::SignerMiddleware,
     providers::{Http, Provider, Middleware},
     signers::{LocalWallet, Signer},
-    types::{BlockNumber, Bytes, Filter, FilterBlockOption, H160, H256, TransactionReceipt, U64, U256, ValueOrArray},
+    types::{BlockNumber, Bytes, TransactionReceipt, U64, U256},
     utils::hex::FromHex,
 };
 use melnet2::{Backhaul, wire::tcp::TcpBackhaul};
@@ -29,11 +29,13 @@ use tabwriter::TabWriter;
 use themelio_nodeprot::{NodeRpcClient, ValClient};
 use themelio_stf::melvm::Covenant;
 use themelio_structs::{
+    Address,
     BlockHeight,
     Header,
     NetID,
     Transaction,
-    TxHash, STAKE_EPOCH,
+    TxHash,
+    STAKE_EPOCH,
 };
 
 use cli::*;
@@ -41,7 +43,6 @@ use structs::*;
 
 const _COV_PATH: &str = "bridge-covenants/bridge.melo";
 const BRIDGE_ADDRESS: &str = "56E618FB75B9344eFBcD63ef138F90277b1C1593";
-const HEADER_VERIFIED_TOPIC: &str = "8cee0a7da402e70d36d0d5cba99d9b5f4b6490c10ff25c61043cce84c3f1ac01";
 const CONTRACT_DEPLOYMENT_HEIGHT: BlockNumber = BlockNumber::Number(U64([0x753927]));
 
 static _STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
@@ -197,18 +198,15 @@ async fn get_header(block_height: BlockHeight) -> Result<Header> {
 }
 
 async fn get_stakes(_block_height: BlockHeight) -> Result<Vec<u8>> {
-    Ok(vec!())
+    todo!()
 }
 
 async fn get_signatures(_block_height: BlockHeight) -> Result<Vec<[u8; 32]>> {
-    Ok(vec!())
+    todo!()
 }
 
 async fn get_proof(_block_height: BlockHeight, _tx_hash: TxHash) -> Result<MerkleProof> {
-    Ok(MerkleProof {
-        bytes: vec!(),
-        tx_index: 0
-    })
+    todo!()
 }
 
 async fn get_historical_data(epochs: Range<u64>, base_verifier_height: BlockHeight) -> Result<Vec<HeaderVerificationArgs>> {
@@ -245,7 +243,7 @@ async fn get_historical_data(epochs: Range<u64>, base_verifier_height: BlockHeig
     })
 }
 
-async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
+async fn get_mint_args(freeze_data: FreezeData) -> Result<MintArgs> {
     smol::block_on( async move {
         let freeze_height = freeze_data.block_height;
         let freeze_epoch = freeze_height.epoch();
@@ -255,19 +253,13 @@ async fn fetch_mintargs(freeze_data: FreezeData) -> Result<MintArgs> {
         let freeze_signatures = get_signatures(freeze_height).await?;
         let freeze_proof = get_proof(freeze_height, freeze_tx.hash_nosigs()).await?;
 
-        let filter = Filter{
-            block_option: FilterBlockOption::Range {
-                from_block: Some(CONTRACT_DEPLOYMENT_HEIGHT),
-                to_block: Some(BlockNumber::Latest)
-            },
-            address: Some(ValueOrArray::Value(H160(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?))),
-            topics: [
-                Some(ValueOrArray::Value(Some(H256(<[u8; 32]>::from_hex(HEADER_VERIFIED_TOPIC)?)))),
-                None,
-                None,
-                None,
-            ],
-        };
+        let bridge_contract = ThemelioBridge::new(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?, ETH_CLIENT.clone());
+        let header_verified_filter = bridge_contract.header_verified_filter();
+
+        let filter = header_verified_filter
+            .filter
+            .from_block(CONTRACT_DEPLOYMENT_HEIGHT)
+            .to_block(BlockNumber::Latest);
 
         let logs = ETH_CLIENT
             .get_logs(&filter)
@@ -393,6 +385,37 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<TransactionReceipt> {
     })
 }
 
+async fn get_frozen_coins() -> Result<()> {
+    todo!()
+}
+
+async fn choose_coin_to_thaw() -> Result<TxHash> {
+    todo!()
+}
+
+async fn burn_tokens(coin_txhash: TxHash, themelio_recipient: Address) -> Result<TransactionReceipt> {
+    smol::block_on(async {
+        let bridge_contract = ThemelioBridge::new(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?, ETH_CLIENT.clone());
+
+        let account = bridge_contract.client().address();
+        let tx_hash = coin_txhash.0.0;
+        let themelio_recipient = themelio_recipient.0.0;
+
+        let burn_tx = bridge_contract.burn(
+            account,
+            tx_hash,
+            themelio_recipient
+        );
+        let burn_receipt = burn_tx
+            .send()
+            .await?
+            .await?
+            .expect("Error burning tokens");
+
+        Ok(burn_receipt)
+    })
+}
+
 fn main() -> Result<()> {
     smol::block_on(async move {
         let twriter = TabWriter::new(std::io::stderr());
@@ -402,7 +425,7 @@ fn main() -> Result<()> {
 
         match subcommand {
             Subcommand::MintTokens(freeze_data) => {
-                let mint_args: MintArgs = fetch_mintargs(freeze_data).await?;
+                let mint_args: MintArgs = get_mint_args(freeze_data).await?;
                 println!("Mintargs: {:#?}", mint_args);
 
                 let mint_receipt = mint_tokens(mint_args).await?;
@@ -410,11 +433,12 @@ fn main() -> Result<()> {
             }
 
             Subcommand::BurnTokens(burn_args) => {
-                // let burn_data = burn_tokens(burn_args).await?;
-                // let thaw_args = fetch_thawargs(burn_data).await?;
-                // let thaw_tx = ...
+                let coin_txhash = choose_coin_to_thaw().await?;
+                let burn_data = burn_tokens(coin_txhash, burn_args.themelio_recipient).await?;
+                // let thaw_args = get_thaw_args(burn_data).await?;
+                // let thaw_receipt = thaw_coins(thaw_args).await?;
 
-                println!("Tokens burned successfully:\n{:?}", burn_args);
+                println!("Tokens burned successfully:\n{:?}", burn_data);
                 // println!("Here is the tx you need for thawing: {}\nMore info at https://github.com/themeliolabs/bridge-cli", thaw_tx);
             }
         }
