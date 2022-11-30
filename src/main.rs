@@ -11,6 +11,7 @@ use std::{
 
 use anyhow::Result;
 use bindings::themelio_bridge::ThemelioBridge;
+use async_compat::CompatExt;
 use clap::Parser;
 use colored::Colorize;
 use ethers::{
@@ -94,6 +95,7 @@ static ETH_CLIENT: Lazy<Arc<SignerMiddleware<Provider<Http>, LocalWallet>>> = La
 
         let chain_id = provider
             .get_chainid()
+            .compat()
             .await
             .unwrap()
             .as_u64();
@@ -174,7 +176,8 @@ async fn get_tx(tx_hash: TxHash) -> Result<Transaction> {
     smol::block_on( async move {
         let snapshot = THE_CLIENT.snapshot().await?;
 
-        let tx = snapshot.get_transaction(tx_hash).await?
+        let tx = snapshot.get_transaction(tx_hash)
+            .await?
             .expect("Transaction with provided hash does not exist");
 
         Ok(tx)
@@ -263,6 +266,7 @@ async fn get_mint_args(freeze_data: FreezeData) -> Result<MintArgs> {
 
         let logs = ETH_CLIENT
             .get_logs(&filter)
+            .compat()
             .await?;
 
         let highest_verified_height = BlockHeight(
@@ -346,6 +350,7 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<TransactionReceipt> {
         let freeze_stakes_tx = bridge_contract.verify_stakes(freeze_stakes.clone());
         let freeze_stakes_receipt = freeze_stakes_tx
             .send()
+            .compat()
             .await?
             .await?;
 
@@ -359,6 +364,7 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<TransactionReceipt> {
         );
         let freeze_header_receipt = freeze_header_tx
             .send()
+            .compat()
             .await?
             .await?;
 
@@ -377,6 +383,7 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<TransactionReceipt> {
         );
         let freeze_tx_receipt = freeze_tx_tx
             .send()
+            .compat()
             .await?
             .await?
             .expect("Error minting tokens");
@@ -386,7 +393,34 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<TransactionReceipt> {
 }
 
 async fn get_frozen_coins() -> Result<()> {
-    todo!()
+    smol::block_on(async {
+        let bridge_contract = ThemelioBridge::new(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?, ETH_CLIENT.clone());
+
+        let mint_filter = bridge_contract
+            .tx_verified_filter()
+            .filter
+            .from_block(CONTRACT_DEPLOYMENT_HEIGHT)
+            .to_block(BlockNumber::Latest);
+        let mint_logs = ETH_CLIENT
+            .get_logs(&mint_filter)
+            .compat()
+            .await?;
+
+        let burn_filter = bridge_contract
+            .tokens_burned_filter()
+            .filter
+            .from_block(CONTRACT_DEPLOYMENT_HEIGHT)
+            .to_block(BlockNumber::Latest);
+        let burn_logs = ETH_CLIENT
+            .get_logs(&burn_filter)
+            .compat()
+            .await?;
+
+        println!("{:#?}", mint_logs);
+        println!("{:#?}", burn_logs);
+
+        Ok(())
+    })
 }
 
 async fn choose_coin_to_thaw() -> Result<TxHash> {
@@ -408,6 +442,7 @@ async fn burn_tokens(coin_txhash: TxHash, themelio_recipient: Address) -> Result
         );
         let burn_receipt = burn_tx
             .send()
+            .compat()
             .await?
             .await?
             .expect("Error burning tokens");
@@ -433,12 +468,13 @@ fn main() -> Result<()> {
             }
 
             Subcommand::BurnTokens(burn_args) => {
-                let coin_txhash = choose_coin_to_thaw().await?;
-                let burn_data = burn_tokens(coin_txhash, burn_args.themelio_recipient).await?;
+                get_frozen_coins().await?;
+                // let coin_txhash = choose_coin_to_thaw().await?;
+                // let burn_data = burn_tokens(coin_txhash, burn_args.themelio_recipient).await?;
                 // let thaw_args = get_thaw_args(burn_data).await?;
                 // let thaw_receipt = thaw_coins(thaw_args).await?;
 
-                println!("Tokens burned successfully:\n{:?}", burn_data);
+                // println!("Tokens burned successfully:\n{:?}", burn_data);
                 // println!("Here is the tx you need for thawing: {}\nMore info at https://github.com/themeliolabs/bridge-cli", thaw_tx);
             }
         }
