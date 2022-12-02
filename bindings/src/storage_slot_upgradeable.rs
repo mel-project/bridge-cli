@@ -25,7 +25,7 @@ pub mod storage_slot_upgradeable {
     #[doc = r" Bytecode of the #name contract"]
     pub static STORAGESLOTUPGRADEABLE_BYTECODE: ethers::contract::Lazy<ethers::core::types::Bytes> =
         ethers::contract::Lazy::new(|| {
-            "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea2646970667358221220ed396a6f499a00894f0028a81d49f331e3620a6a2af1268aefa764f44382486c64736f6c634300080d0033" . parse () . expect ("invalid bytecode")
+            "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea264697066735822122077605331f9c62ea8705b40fd1f8e882d8287cb73cc26dbc8a2c54d3c2be3c78064736f6c63430008100033" . parse () . expect ("invalid bytecode")
         });
     pub struct StorageSlotUpgradeable<M>(ethers::contract::Contract<M>);
     impl<M> Clone for StorageSlotUpgradeable<M> {

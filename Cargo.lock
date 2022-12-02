@@ -1587,9 +1587,9 @@ dependencies = [
 
 [[package]]
 name = "ethers"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d338f456cf5158d8cb630d39202cca4416ad2248193eadf9562bfb563d123176"
+checksum = "11f26f9d8d80da18ca72aca51804c65eb2153093af3bec74fd5ce32aa0c1f665"
 dependencies = [
  "ethers-addressbook",
  "ethers-contract",
@@ -5022,9 +5022,9 @@ dependencies = [
 
 [[package]]
 name = "themelio-stf"
-version = "0.11.12"
+version = "0.11.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e256f766cd5e327498c629f2d604db5564b03d6e32e5553c88e7a0a8bd124fb5"
+checksum = "6f93b4a3f23f2413e66a926d7701a1805413578ef362e6d2bb2fe33d1d8c9bc7"
 dependencies = [
  "arbitrary",
  "assoc",
@@ -5065,9 +5065,9 @@ dependencies = [
 
 [[package]]
 name = "themelio-structs"
-version = "0.2.10"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb573415e353bb6086f03a1a2b203ee15859138587c35973a0ec93b0cc80214f"
+checksum = "708dd0a370fa43ad0841ad6225e780e9c4896316b7cf5586b63deeb38815ce0a"
 dependencies = [
  "arbitrary",
  "derivative",

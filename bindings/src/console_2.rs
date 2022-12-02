@@ -25,7 +25,7 @@ pub mod console_2 {
     #[doc = r" Bytecode of the #name contract"]
     pub static CONSOLE2_BYTECODE: ethers::contract::Lazy<ethers::core::types::Bytes> =
         ethers::contract::Lazy::new(|| {
-            "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea26469706673582212200d07be0e01a7bd585be62a310466254e529f2fada0c2be23accfc3d01b95942a64736f6c634300080d0033" . parse () . expect ("invalid bytecode")
+            "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea264697066735822122069070e148a6e03944ca56e343a39935fe3474867a2b89ed7283571be9acb06d364736f6c63430008100033" . parse () . expect ("invalid bytecode")
         });
     pub struct console2<M>(ethers::contract::Contract<M>);
     impl<M> Clone for console2<M> {

@@ -25,7 +25,7 @@ pub mod storage_slot {
     #[doc = r" Bytecode of the #name contract"]
     pub static STORAGESLOT_BYTECODE: ethers::contract::Lazy<ethers::core::types::Bytes> =
         ethers::contract::Lazy::new(|| {
-            "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea264697066735822122035c162430f624630b9adca0c7817e772929b559b1adbca8e3e692bf84c544c7b64736f6c634300080d0033" . parse () . expect ("invalid bytecode")
+            "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea2646970667358221220b4f59dab241de359ba190514c892b0c27a9a1bfb74766f052de65576018f439e64736f6c63430008100033" . parse () . expect ("invalid bytecode")
         });
     pub struct StorageSlot<M>(ethers::contract::Contract<M>);
     impl<M> Clone for StorageSlot<M> {

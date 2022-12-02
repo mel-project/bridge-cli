@@ -1,5 +1,6 @@
 [package]
 name = "bridge-cli"
+authors = ["Marco Serrano <marco@themelio.com>"]
 version = "0.1.0"
 edition = "2021"
 
@@ -11,7 +12,7 @@ async-compat = "0.2.1"
 bindings = { path = "./bindings" }
 clap = { version = "4.0.22", features = ["derive"] }
 colored = "2.0.0"
-ethers = { version = "1.0.1", features = ["rustls"] }
+ethers = { version = "1.0.2", features = ["rustls"] }
 futures = "0.3.25"
 hex = "0.4.3"
 melnet2 = "0.1.8"
@@ -27,6 +28,6 @@ stdcode = "0.1.13"
 tabwriter = "1.2.1"
 themelio-bootstrap = "0.7.2"
 themelio-nodeprot = "0.12.1"
-themelio-stf = "0.11.12"
-themelio-structs = "0.2.0"
+themelio-stf = "0.11.13"
+themelio-structs = "0.2.12"
 tmelcrypt = "0.2.6"

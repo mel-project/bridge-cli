@@ -25,7 +25,7 @@ pub mod sha_512 {
     #[doc = r" Bytecode of the #name contract"]
     pub static SHA512_BYTECODE: ethers::contract::Lazy<ethers::core::types::Bytes> =
         ethers::contract::Lazy::new(|| {
-            "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea264697066735822122013a0dce1c25d3dec1a6f6fa267db7450d1650ead32d776d6d8c7e9dbde78754064736f6c634300080d0033" . parse () . expect ("invalid bytecode")
+            "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea2646970667358221220762a8a79327ccc6ff52672e235889b7fbef947d12686c7cf2d2d7e1a1b253e8264736f6c63430008100033" . parse () . expect ("invalid bytecode")
         });
     pub struct Sha512<M>(ethers::contract::Contract<M>);
     impl<M> Clone for Sha512<M> {

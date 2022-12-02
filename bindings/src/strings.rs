@@ -25,7 +25,7 @@ pub mod strings {
     #[doc = r" Bytecode of the #name contract"]
     pub static STRINGS_BYTECODE: ethers::contract::Lazy<ethers::core::types::Bytes> =
         ethers::contract::Lazy::new(|| {
-            "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea26469706673582212200a45c347f4253afbcbfabe0a5be6ade3f86724db2a0f473b91306611cc85322a64736f6c634300080d0033" . parse () . expect ("invalid bytecode")
+            "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea26469706673582212209983f44505e4983c634728387da50c4396101f6ebe68702b649da18011efe34564736f6c63430008100033" . parse () . expect ("invalid bytecode")
         });
     pub struct Strings<M>(ethers::contract::Contract<M>);
     impl<M> Clone for Strings<M> {

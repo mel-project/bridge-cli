@@ -43,8 +43,8 @@ use cli::*;
 use structs::*;
 
 const _COV_PATH: &str = "bridge-covenants/bridge.melo";
-const BRIDGE_ADDRESS: &str = "56E618FB75B9344eFBcD63ef138F90277b1C1593";
-const CONTRACT_DEPLOYMENT_HEIGHT: BlockNumber = BlockNumber::Number(U64([0x753927]));
+const BRIDGE_ADDRESS: &str = "5d2dfe6651b2ba9ff032b85195665b17b608baff";
+const CONTRACT_DEPLOYMENT_HEIGHT: BlockNumber = BlockNumber::Number(U64([8062514]));
 
 static _STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
     Lazy::new(|| Mutex::new(BufReader::new(std::io::stdin())));
@@ -314,6 +314,12 @@ async fn get_mint_args(freeze_data: FreezeData) -> Result<MintArgs> {
     })
 }
 
+async fn get_verification_limit() -> Result<u32> {
+    smol::block_on(async {
+        Ok(100)
+    })
+}
+
 async fn mint_tokens(mint_args: MintArgs) -> Result<TransactionReceipt> {
     smol::block_on(async {
         let bridge_contract = ThemelioBridge::new(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?, ETH_CLIENT.clone());
@@ -330,10 +336,11 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<TransactionReceipt> {
                     (
                         bridge_contract.verify_stakes(Bytes(historical_args.clone().stakes.into())),
                         bridge_contract.verify_header(
-                            U256::from(historical_args.verifier_height.0),
-                            Bytes(historical_args.header.stdcode().into()),
-                            Bytes(historical_args.stakes.into()),
-                            historical_args.signatures
+                            historical_args.verifier_height.0.into(),
+                            historical_args.header.stdcode().into(),
+                            historical_args.stakes.into(),
+                            historical_args.signatures,
+                            get_verification_limit().await.expect("Error simulating header verification").into()
                         )
                     )
                 })
@@ -360,7 +367,8 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<TransactionReceipt> {
             verifier_height,
             freeze_header,
             freeze_stakes,
-            freeze_signatures
+            freeze_signatures,
+            get_verification_limit().await.expect("Error simulating header verification").into()
         );
         let freeze_header_receipt = freeze_header_tx
             .send()
