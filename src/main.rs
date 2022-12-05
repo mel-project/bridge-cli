@@ -15,6 +15,7 @@ use async_compat::CompatExt;
 use clap::Parser;
 use colored::Colorize;
 use ethers::{
+    abi::{ParamType},
     prelude::SignerMiddleware,
     providers::{Http, Provider, Middleware},
     signers::{LocalWallet, Signer},
@@ -38,6 +39,7 @@ use themelio_structs::{
     TxHash,
     STAKE_EPOCH,
 };
+use tmelcrypt::HashVal;
 
 use cli::*;
 use structs::*;
@@ -400,7 +402,7 @@ async fn mint_tokens(mint_args: MintArgs) -> Result<TransactionReceipt> {
     })
 }
 
-async fn get_frozen_coins() -> Result<()> {
+async fn get_frozen_coins() -> Result<Vec<TxHash>> {
     smol::block_on(async {
         let bridge_contract = ThemelioBridge::new(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?, ETH_CLIENT.clone());
 
@@ -414,6 +416,15 @@ async fn get_frozen_coins() -> Result<()> {
             .compat()
             .await?;
 
+        let coins_minted: Vec<TxHash> = mint_logs
+            .into_iter()
+            .map(|mint_log| {
+                let tx_hash = mint_log.topics[2];
+
+                TxHash(HashVal(tx_hash.0))
+            })
+            .collect();
+
         let burn_filter = bridge_contract
             .tokens_burned_filter()
             .filter
@@ -424,10 +435,52 @@ async fn get_frozen_coins() -> Result<()> {
             .compat()
             .await?;
 
-        println!("{:#?}", mint_logs);
-        println!("{:#?}", burn_logs);
+        let coins_burned: Vec<TxHash> = burn_logs
+            .into_iter()
+            .map(|burn_log| {
+                let tokens = ethers::abi::decode(
+                    &[ParamType::Array(Box::new(ParamType::FixedBytes(32)))],
+                    &burn_log.data
+                ).expect("Error decoding minted coins");
 
-        Ok(())
+                let txhash_vec_vec: Vec<TxHash> = tokens
+                    .into_iter()
+                    .map(|token_arr| {
+                        let hashes: Vec<TxHash> = token_arr
+                            .into_array()
+                            .expect("Error turning token into array")
+                            .into_iter()
+                            .map(|token| {
+                                let hash = TxHash(HashVal(
+                                    token
+                                        .into_fixed_bytes()
+                                        .expect("Error converting token to byte vector")
+                                        .try_into()
+                                        .expect("Error converting vector to fixed-size array")
+                                ));
+
+                                hash
+                            })
+                            .collect();
+
+                        hashes
+                    })
+                    .flatten()
+                    .collect();
+
+                txhash_vec_vec
+            })
+            .flatten()
+            .collect();
+
+        let coins_left: Vec<TxHash> = coins_minted
+            .into_iter()
+            .filter(|coin| {
+                !coins_burned.contains(coin)
+            })
+            .collect();
+
+        Ok(coins_left)
     })
 }
 
