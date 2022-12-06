@@ -11,8 +11,6 @@ use serde_yaml;
 use themelio_structs::{
     Address as ThemelioAddress,
     BlockHeight,
-    CoinValue,
-    Denom,
     TxHash,
 };
 

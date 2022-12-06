@@ -33,6 +33,8 @@ use themelio_stf::melvm::Covenant;
 use themelio_structs::{
     Address,
     BlockHeight,
+    CoinDataHeight,
+    CoinID,
     Header,
     NetID,
     Transaction,
@@ -159,19 +161,16 @@ async fn _proceed_prompt() -> Result<()> {
     Ok(())
 }
 
-fn _write_txhash(out: &mut impl Write, wallet_name: &str, txhash: TxHash) -> anyhow::Result<()> {
-    writeln!(out, "Transaction hash:\t{}", txhash.to_string().bold())?;
-    writeln!(
-        out,
-        "(wait for confirmation with {})",
-        format!(
-            "melwallet-cli wait-confirmation -w {} {}",
-            wallet_name, txhash
-        )
-        .bright_blue(),
-    )?;
+async fn get_coin(tx_hash: TxHash) -> Result<CoinDataHeight> {
+    smol::block_on( async move {
+        let snapshot = THE_CLIENT.snapshot().await?;
 
-    Ok(())
+        let coin = snapshot.get_coin(CoinID::new(tx_hash, 0))
+            .await?
+            .expect("Coin with provided tx hash does not exist");
+
+        Ok(coin)
+    })
 }
 
 async fn get_tx(tx_hash: TxHash) -> Result<Transaction> {
@@ -484,8 +483,72 @@ async fn get_frozen_coins() -> Result<Vec<TxHash>> {
     })
 }
 
-async fn choose_coin_to_thaw() -> Result<TxHash> {
-    todo!()
+async fn choose_coin_to_thaw(mut twriter: impl Write) -> Result<TxHash> {
+    smol::block_on(async move {
+        let coin_hashes = get_frozen_coins().await?;
+
+        if coin_hashes.is_empty() {
+            writeln!(twriter, "{}", "There are currently no frozen Themelio coins that can be bridged back.".blue())?;
+
+            anyhow::bail!("Exiting");
+        }
+
+        let coins: Vec<CoinDataHeight> = futures::future::join_all(
+            coin_hashes
+                .clone()
+                .into_iter()
+                .map(|coin_hash| async move {
+                    let coin = get_coin(coin_hash).await.expect("Error retreiving coin");
+
+                    coin
+                })
+        ).await;
+
+        writeln!(twriter, "{}", "COINS".bold().yellow())?;
+        writeln!(twriter, "{}", "#\tHEIGHT\tTX HASH\tDENOM\tVALUE")?;
+
+        let choice_range = 0..coin_hashes.len();
+        for idx in choice_range.clone() {
+            writeln!(
+                twriter,
+                "{}\t{}\t{}\t{}\t{}",
+                idx + 1,
+                coins[idx].height,
+                coin_hashes[idx],
+                coins[idx].coin_data.denom,
+                coins[idx].coin_data.value
+            )?;
+        }
+
+        writeln!(twriter, "{}", "Which coin would you like to bridge back to Themelio? ")?;
+        let choice = smol::unblock(move || {
+            let mut choice = [0u8; 1];
+
+            match _STDIN_BUFFER.lock().as_deref_mut() {
+                Ok(stdin) => {
+                    while choice[0].is_ascii_whitespace() || choice[0] == 0 {
+                        stdin.read_exact(&mut choice)?;
+                    }
+                    Ok(choice)
+                }
+
+                Err(_) => return Err(anyhow::anyhow!("Unknown buffer unlock problem")),
+            }
+        })
+        .await?;
+
+        let validated_choice = if choice_range.contains(&(choice[0] as usize)) {
+            choice[0]
+        } else {
+            return Err(anyhow::anyhow!("Invalid option"));
+        };
+
+        let chosen_coin_hash = coin_hashes[validated_choice as usize];
+
+        twriter.flush()?;
+
+        Ok(chosen_coin_hash)
+    })
 }
 
 async fn burn_tokens(coin_txhash: TxHash, themelio_recipient: Address) -> Result<TransactionReceipt> {
@@ -529,9 +592,8 @@ fn main() -> Result<()> {
             }
 
             Subcommand::BurnTokens(burn_args) => {
-                get_frozen_coins().await?;
-                // let coin_txhash = choose_coin_to_thaw().await?;
-                // let burn_data = burn_tokens(coin_txhash, burn_args.themelio_recipient).await?;
+                let coin_txhash = choose_coin_to_thaw(twriter).await?;
+                let burn_data = burn_tokens(coin_txhash, burn_args.themelio_recipient).await?;
                 // let thaw_args = get_thaw_args(burn_data).await?;
                 // let thaw_receipt = thaw_coins(thaw_args).await?;
 
