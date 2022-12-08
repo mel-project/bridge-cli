@@ -19,7 +19,7 @@ use ethers::{
     prelude::SignerMiddleware,
     providers::{Http, Provider, Middleware},
     signers::{LocalWallet, Signer},
-    types::{BlockNumber, Bytes, TransactionReceipt, U64, U256},
+    types::{BlockId, BlockNumber, Bytes, H160, H256, TransactionReceipt, U64, U256},
     utils::hex::FromHex,
 };
 use melnet2::{Backhaul, wire::tcp::TcpBackhaul};
@@ -48,9 +48,10 @@ use structs::*;
 
 const _COV_PATH: &str = "bridge-covenants/bridge.melo";
 const BRIDGE_ADDRESS: &str = "5d2dfe6651b2ba9ff032b85195665b17b608baff";
+const COINS_SLOT: H256 = H256([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 254]);
 const CONTRACT_DEPLOYMENT_HEIGHT: BlockNumber = BlockNumber::Number(U64([8062514]));
 
-static _STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
+static STDIN_BUFFER: Lazy<Mutex<BufReader<Stdin>>> =
     Lazy::new(|| Mutex::new(BufReader::new(std::io::stdin())));
 
 static CLI_ARGS: Lazy<Cli> = Lazy::new(Cli::parse);
@@ -141,7 +142,7 @@ async fn _proceed_prompt() -> Result<()> {
     let letter = smol::unblock(move || {
         let mut letter = [0u8; 1];
 
-        match _STDIN_BUFFER.lock().as_deref_mut() {
+        match STDIN_BUFFER.lock().as_deref_mut() {
             Ok(stdin) => {
                 while letter[0].is_ascii_whitespace() || letter[0] == 0 {
                     stdin.read_exact(&mut letter)?;
@@ -483,7 +484,7 @@ async fn get_frozen_coins() -> Result<Vec<TxHash>> {
     })
 }
 
-async fn choose_coin_to_thaw(mut twriter: impl Write) -> Result<TxHash> {
+async fn choose_coin_to_thaw(mut twriter: impl Write) -> Result<CoinDataHeightHash> {
     smol::block_on(async move {
         let coin_hashes = get_frozen_coins().await?;
 
@@ -524,7 +525,7 @@ async fn choose_coin_to_thaw(mut twriter: impl Write) -> Result<TxHash> {
         let choice = smol::unblock(move || {
             let mut choice = [0u8; 1];
 
-            match _STDIN_BUFFER.lock().as_deref_mut() {
+            match STDIN_BUFFER.lock().as_deref_mut() {
                 Ok(stdin) => {
                     while choice[0].is_ascii_whitespace() || choice[0] == 0 {
                         stdin.read_exact(&mut choice)?;
@@ -544,19 +545,24 @@ async fn choose_coin_to_thaw(mut twriter: impl Write) -> Result<TxHash> {
         };
 
         let chosen_coin_hash = coin_hashes[validated_choice as usize];
+        let chosen_coin = &coins[validated_choice as usize];
 
         twriter.flush()?;
 
-        Ok(chosen_coin_hash)
+        Ok(CoinDataHeightHash{
+            coin_data: chosen_coin.coin_data.clone(),
+            block_height: chosen_coin.height,
+            tx_hash: chosen_coin_hash
+        })
     })
 }
 
-async fn burn_tokens(coin_txhash: TxHash, themelio_recipient: Address) -> Result<TransactionReceipt> {
+async fn burn_tokens(coin: CoinDataHeightHash, themelio_recipient: Address) -> Result<TransactionReceipt> {
     smol::block_on(async {
         let bridge_contract = ThemelioBridge::new(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?, ETH_CLIENT.clone());
 
         let account = bridge_contract.client().address();
-        let tx_hash = coin_txhash.0.0;
+        let tx_hash = coin.tx_hash.0.0;
         let themelio_recipient = themelio_recipient.0.0;
 
         let burn_tx = bridge_contract.burn(
@@ -573,6 +579,24 @@ async fn burn_tokens(coin_txhash: TxHash, themelio_recipient: Address) -> Result
 
         Ok(burn_receipt)
     })
+}
+
+async fn to_thaw_args(coin: CoinDataHeightHash, burn_receipt: TransactionReceipt) -> Result<ThawArgs> {
+    assert!(burn_receipt.status.expect("Error retreiving burn status") == 1.into());
+
+    let tx_hash = burn_receipt.transaction_hash;
+
+    Ok(ThawArgs {
+        coins_slot: COINS_SLOT,
+        contract_address: H160(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?),
+        tx_hash,
+        coin: coin.coin_data,
+        block_id: BlockId::Number(BlockNumber::Number(coin.block_height.0.into()))
+    })
+}
+
+async fn craft_thaw_tx(thaw_args: ThawArgs) -> Result<Transaction> {
+    todo!()
 }
 
 fn main() -> Result<()> {
@@ -592,13 +616,15 @@ fn main() -> Result<()> {
             }
 
             Subcommand::BurnTokens(burn_args) => {
-                let coin_txhash = choose_coin_to_thaw(twriter).await?;
-                let burn_data = burn_tokens(coin_txhash, burn_args.themelio_recipient).await?;
-                // let thaw_args = get_thaw_args(burn_data).await?;
-                // let thaw_receipt = thaw_coins(thaw_args).await?;
+                let coin = choose_coin_to_thaw(twriter).await?;
 
-                // println!("Tokens burned successfully:\n{:?}", burn_data);
-                // println!("Here is the tx you need for thawing: {}\nMore info at https://github.com/themeliolabs/bridge-cli", thaw_tx);
+                let burn_data = burn_tokens(coin.clone(), burn_args.themelio_recipient).await?;
+                println!("Tokens burned successfully:\n{:?}", burn_data);
+
+                let thaw_args = to_thaw_args(coin, burn_data).await?;
+                let thaw_tx = craft_thaw_tx(thaw_args).await?;
+
+                println!("Here is the tx you need for thawing: {:#?}\nMore info at https://github.com/themeliolabs/bridge-cli", thaw_tx);
             }
         }
 

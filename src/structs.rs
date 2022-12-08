@@ -1,7 +1,10 @@
+use ethers::types::{Address, BlockId, H256};
 use themelio_structs::{
     BlockHeight,
+    CoinData,
     Header,
     Transaction,
+    TxHash,
 };
 
 #[derive(Clone, Debug)]
@@ -25,6 +28,22 @@ pub struct MintArgs {
     pub historical_header_args: Vec<HeaderVerificationArgs>,
     pub header_args: HeaderVerificationArgs,
     pub tx_args: TxVerificationArgs,
+}
+
+#[derive(Clone, Debug)]
+pub struct CoinDataHeightHash {
+    pub coin_data: CoinData,
+    pub block_height: BlockHeight,
+    pub tx_hash: TxHash,
+}
+
+#[derive(Debug)]
+pub struct ThawArgs {
+    pub coins_slot: H256,
+    pub contract_address: Address,
+    pub tx_hash: H256,
+    pub coin: CoinData,
+    pub block_id: BlockId,
 }
 
 #[derive(Debug)]
