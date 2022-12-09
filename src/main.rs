@@ -46,7 +46,7 @@ use tmelcrypt::HashVal;
 use cli::*;
 use structs::*;
 
-const _COV_PATH: &str = "bridge-covenants/bridge.melo";
+const COV_PATH: &str = "bridge-covenants/bridge.melo";
 const BRIDGE_ADDRESS: &str = "5d2dfe6651b2ba9ff032b85195665b17b608baff";
 const COINS_SLOT: H256 = H256([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 254]);
 const CONTRACT_DEPLOYMENT_HEIGHT: BlockNumber = BlockNumber::Number(U64([8062514]));
@@ -115,8 +115,8 @@ static ETH_CLIENT: Lazy<Arc<SignerMiddleware<Provider<Http>, LocalWallet>>> = La
     })
 });
 
-fn _compile_cov() -> Result<Covenant> {
-    let cov_path = Path::new(_COV_PATH);
+fn compile_cov() -> Result<Covenant> {
+    let cov_path = Path::new(COV_PATH);
 
     let melo_str = std::fs::read_to_string(cov_path)
         .map_err(LoadFileError::IoError)?;
@@ -581,7 +581,7 @@ async fn burn_tokens(coin: CoinDataHeightHash, themelio_recipient: Address) -> R
     })
 }
 
-async fn to_thaw_args(coin: CoinDataHeightHash, burn_receipt: TransactionReceipt) -> Result<ThawArgs> {
+async fn to_thawargs(coin: CoinDataHeightHash, burn_receipt: TransactionReceipt) -> Result<ThawArgs> {
     assert!(burn_receipt.status.expect("Error retreiving burn status") == 1.into());
 
     let tx_hash = burn_receipt.transaction_hash;
@@ -595,8 +595,18 @@ async fn to_thaw_args(coin: CoinDataHeightHash, burn_receipt: TransactionReceipt
     })
 }
 
-async fn craft_thaw_tx(thaw_args: ThawArgs) -> Result<Transaction> {
-    todo!()
+async fn craft_thaw_tx(thaw_args: ThawArgs) -> Result<String> {
+    let cov = compile_cov()?;
+
+    println!("cov weight: {}", cov.weight()?);
+
+    let tx_cmd = format!(
+        "melwallet-cli send -w [WALLET_NAME] --force-spend {}-0 --add-covenant {}",
+        cov.hash(),
+        hex::encode(cov.stdcode())
+    );
+
+    Ok(tx_cmd)
 }
 
 fn main() -> Result<()> {
@@ -621,10 +631,10 @@ fn main() -> Result<()> {
                 let burn_data = burn_tokens(coin.clone(), burn_args.themelio_recipient).await?;
                 println!("Tokens burned successfully:\n{:?}", burn_data);
 
-                let thaw_args = to_thaw_args(coin, burn_data).await?;
-                let thaw_tx = craft_thaw_tx(thaw_args).await?;
+                let thaw_args = to_thawargs(coin, burn_data).await?;
+                let thaw_cmd = craft_thaw_tx(thaw_args).await?;
 
-                println!("Here is the tx you need for thawing: {:#?}\nMore info at https://github.com/themeliolabs/bridge-cli", thaw_tx);
+                println!("Here is the melwallet-cli command you need for thawing: {}\nMore info at https://github.com/themeliolabs/bridge-cli", thaw_cmd);
             }
         }
 
