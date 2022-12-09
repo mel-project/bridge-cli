@@ -210,7 +210,7 @@ async fn get_signatures(_block_height: BlockHeight) -> Result<Vec<[u8; 32]>> {
     todo!()
 }
 
-async fn get_proof(_block_height: BlockHeight, _tx_hash: TxHash) -> Result<MerkleProof> {
+async fn get_mint_proof(_block_height: BlockHeight, _tx_hash: TxHash) -> Result<MerkleProof> {
     todo!()
 }
 
@@ -256,7 +256,7 @@ async fn get_mint_args(freeze_data: FreezeData) -> Result<MintArgs> {
         let freeze_tx = get_tx(freeze_data.tx_hash).await?;
         let freeze_stakes = get_stakes(freeze_height).await?;
         let freeze_signatures = get_signatures(freeze_height).await?;
-        let freeze_proof = get_proof(freeze_height, freeze_tx.hash_nosigs()).await?;
+        let freeze_proof = get_mint_proof(freeze_height, freeze_tx.hash_nosigs()).await?;
 
         let bridge_contract = ThemelioBridge::new(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?, ETH_CLIENT.clone());
         let header_verified_filter = bridge_contract.header_verified_filter();
@@ -557,7 +557,7 @@ async fn choose_coin_to_thaw(mut twriter: impl Write) -> Result<CoinDataHeightHa
     })
 }
 
-async fn burn_tokens(coin: CoinDataHeightHash, themelio_recipient: Address) -> Result<TransactionReceipt> {
+async fn burn_tokens(coin: &CoinDataHeightHash, themelio_recipient: Address) -> Result<TransactionReceipt> {
     smol::block_on(async {
         let bridge_contract = ThemelioBridge::new(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?, ETH_CLIENT.clone());
 
@@ -581,7 +581,7 @@ async fn burn_tokens(coin: CoinDataHeightHash, themelio_recipient: Address) -> R
     })
 }
 
-async fn to_thawargs(coin: CoinDataHeightHash, burn_receipt: TransactionReceipt) -> Result<ThawArgs> {
+async fn to_thawargs(coin: &CoinDataHeightHash, burn_receipt: TransactionReceipt) -> Result<ThawArgs> {
     assert!(burn_receipt.status.expect("Error retreiving burn status") == 1.into());
 
     let tx_hash = burn_receipt.transaction_hash;
@@ -590,20 +590,49 @@ async fn to_thawargs(coin: CoinDataHeightHash, burn_receipt: TransactionReceipt)
         coins_slot: COINS_SLOT,
         contract_address: H160(<[u8; 20]>::from_hex(BRIDGE_ADDRESS)?),
         tx_hash,
-        coin: coin.coin_data,
+        coin: coin.coin_data.clone(),
         block_id: BlockId::Number(BlockNumber::Number(coin.block_height.0.into()))
     })
 }
 
-async fn craft_thaw_tx(thaw_args: ThawArgs) -> Result<String> {
+async fn get_thaw_proof(thaw_args: ThawArgs) -> Result<Vec<u8>> {
+    let location = U256::from(
+        ethers::utils::keccak256(
+            [thaw_args.tx_hash.as_bytes(), thaw_args.coins_slot.as_bytes()].concat()
+        )
+    ) + 2;
+
+    let locations: Vec<H256> = vec!(<H256 as ethers::types::BigEndianHash>::from_uint(&location));
+    let from = thaw_args.contract_address;
+    let block = Some(thaw_args.block_id);
+
+    let proof = ETH_CLIENT
+        .get_proof(from, locations, block)
+        .await?;
+
+    let account_proof = proof.account_proof.concat();
+    let storage_proof = proof.storage_proof[0].proof.concat();
+    let thaw_proof = [account_proof, storage_proof].concat();
+
+    Ok(thaw_proof)
+}
+
+async fn craft_thaw_tx(coin: &CoinDataHeightHash, proof: Vec<u8>) -> Result<String> {
     let cov = compile_cov()?;
 
-    println!("cov weight: {}", cov.weight()?);
+    let cov_hash = cov.hash();
+    let cov_bytes = hex::encode(cov.stdcode());
+    let coin_value = coin.coin_data.value;
+    let coin_denom = coin.coin_data.denom;
+    let additional_data = hex::encode(proof);
 
     let tx_cmd = format!(
-        "melwallet-cli send -w [WALLET_NAME] --force-spend {}-0 --add-covenant {}",
-        cov.hash(),
-        hex::encode(cov.stdcode())
+        "melwallet-cli send -w [WALLET_NAME] --force-spend {}-0 --to [WALLET_ADDRESS],{},{},{} --add-covenant {}",
+        cov_hash,
+        coin_value,
+        coin_denom,
+        additional_data,
+        cov_bytes
     );
 
     Ok(tx_cmd)
@@ -628,13 +657,15 @@ fn main() -> Result<()> {
             Subcommand::BurnTokens(burn_args) => {
                 let coin = choose_coin_to_thaw(twriter).await?;
 
-                let burn_data = burn_tokens(coin.clone(), burn_args.themelio_recipient).await?;
+                let burn_data = burn_tokens(&coin, burn_args.themelio_recipient).await?;
                 println!("Tokens burned successfully:\n{:?}", burn_data);
 
-                let thaw_args = to_thawargs(coin, burn_data).await?;
-                let thaw_cmd = craft_thaw_tx(thaw_args).await?;
+                let thaw_args = to_thawargs(&coin, burn_data).await?;
+                let thaw_proof = get_thaw_proof(thaw_args).await?;
+                let thaw_cmd = craft_thaw_tx(&coin, thaw_proof).await?;
 
-                println!("Here is the melwallet-cli command you need for thawing: {}\nMore info at https://github.com/themeliolabs/bridge-cli", thaw_cmd);
+                println!("Here is the melwallet-cli command you need for thawing: {}", thaw_cmd);
+                println!("More info at https://github.com/themeliolabs/bridge-cli");
             }
         }
 
