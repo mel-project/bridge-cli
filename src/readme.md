@@ -1,0 +1,2 @@
+# Bridge-cli
+A simple to use command-line interface which abstracts away the complexities of querying both chains and crafting compliant bridge transactions. It guides the user step-by-step to ensure a smooth user experience, every time.

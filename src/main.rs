@@ -15,7 +15,7 @@ use async_compat::CompatExt;
 use clap::Parser;
 use colored::Colorize;
 use ethers::{
-    abi::{ParamType},
+    abi::ParamType,
     prelude::SignerMiddleware,
     providers::{Http, Provider, Middleware},
     signers::{LocalWallet, Signer},
@@ -31,6 +31,7 @@ use tabwriter::TabWriter;
 use themelio_nodeprot::{NodeRpcClient, ValClient};
 use themelio_stf::melvm::Covenant;
 use themelio_structs::{
+    STAKE_EPOCH,
     Address,
     BlockHeight,
     CoinDataHeight,
@@ -39,7 +40,6 @@ use themelio_structs::{
     NetID,
     Transaction,
     TxHash,
-    STAKE_EPOCH,
 };
 use tmelcrypt::HashVal;
 
